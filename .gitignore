@@ -1,0 +1,15 @@
+# Ignore everything by default
+*
+
+# But track src/ and include/ directories and their contents
+!src/
+!src/**
+!include/
+!include/**
+
+# Also track .gitignore itself
+!.gitignore
+
+# Optionally track Makefile and README if you have them
+!Makefile
+!README.md
