@@ -204,12 +204,14 @@ struct ClusterAdjacency {
 
 
 /*
- * @brief Convolve contact matrix by counting nonzero elements in k×k square centered at each location.
+ * @brief Convolve contact matrix by counting nonzero elements in upper triangular part of window.
+ * Only processes upper triangular elements (excluding diagonal), counts nonzero elements
+ * in the upper triangular portion of the window, then makes result symmetric.
  * @param contact_matrix Input contact matrix (arma::mat).
- * @param k Size of the square window (default=3).
- * @return Convoluted matrix with same shape as input.
+ * @param half_k Half window size (default=3).
+ * @return Convoluted matrix with same shape as input (symmetric).
  */
-arma::mat convolute_contacts(const arma::mat& contact_matrix, int k = 3);
+arma::mat convolute_contacts(const arma::mat& contact_matrix, int half_k = 3);
 
 
 /*
@@ -227,7 +229,6 @@ private:
     arma::mat cluster_center_position_matrix;
     arma::mat pairwise_distance_matrix;
     arma::mat convoluted_contact_matrix;
-    arma::mat convoluted_distance_matrix;
     double beta0;
     double beta1;
     
@@ -269,6 +270,7 @@ private:
                                 int& accepted_b0, int& accepted_b1);
     void sample_cluster_centers(double& current_ll, double sd_center, int& accepted_center);
     void sample_locus_positions(double& current_ll, double sd_locus, int& accepted_locus);
+    void sample_locus_positions_convoluted(double& current_ll, double sd_locus, int& accepted_locus, int k = 3);
     
     // Private helper for finding rotation matrix
     arma::mat rotation_solver(arma::vec sv, arma::vec dv) const;
@@ -378,6 +380,7 @@ public:
      * @param sample_interval Save every kth sample after burn-in (default: 5).
      */
     void run_mcmc(int iterations, int burn_in, double initial_sd = 0.1, double sd_floor = 0.001, double sd_ceiling = 0.3, bool save_samples = false, int sample_interval = 5);
+    void run_mcmc_convoluted(int iterations, int burn_in, double initial_sd = 0.1, double sd_floor = 0.001, double sd_ceiling = 0.3, bool save_samples = false, int sample_interval = 5, int k = 3);
     void run_mcmc_finetune(int iterations);
     // --- GETTERS ---
     const std::string& get_name() const;
@@ -409,7 +412,6 @@ public:
     bool get_skip_zero_contact_loci() const;
     bool get_sample_from_prior() const;
     const arma::mat& get_convoluted_contact_matrix() const;
-    const arma::mat& get_convoluted_distance_matrix() const;
 
 
     // --- SETTERS ---
@@ -426,10 +428,7 @@ public:
     void set_skip_zero_contact_loci(bool skip);
     void set_sample_from_prior(bool sample);
     void set_convoluted_contact_matrix(const arma::mat& convoluted_contacts);
-    void set_convoluted_distance_matrix(const arma::mat& convoluted_distances);
     void compute_convoluted_contact_matrix(int k = 3);
-    void compute_convoluted_distance_matrix(int k = 3);
-    void compute_and_store_convoluted_matrices(int k = 3);
 };
 
 #endif // CHROMOSOME_H

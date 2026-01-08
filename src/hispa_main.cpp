@@ -39,6 +39,8 @@ int main(int argc, char* argv[]) {
     int num_clusters = 0;
     bool use_quantile_threshold = false;
     bool skip_zero_contact_loci = true;  // Default: skip loci with no contacts
+    bool use_convoluted_sampling = false;  // Use convoluted matrices for MCMC sampling
+    int convolution_half_k = 3;  // Half window size for convolution (default: 3)
     
     // Add command-line options
     app.add_option("-i,--input", input_file, "Input contact matrix file path")
@@ -119,6 +121,13 @@ int main(int argc, char* argv[]) {
     app.add_flag("--skipzerocontact{true},--no-skipzerocontact{false}", skip_zero_contact_loci,
         "Skip loci with zero contacts during MCMC sampling (default: true)");
     
+    app.add_flag("--use-convoluted", use_convoluted_sampling,
+        "Use convoluted contact/distance matrices for MCMC sampling");
+    
+    app.add_option("--convolution-half-k", convolution_half_k,
+        "Half window size for convolution (default: 3)")
+        ->check(CLI::PositiveNumber);
+    
     app.add_flag("--verbose", verbose, "Enable verbose output");
     
     // Parse command line
@@ -149,7 +158,11 @@ int main(int argc, char* argv[]) {
         if (save_samples) {
             std::cout << "Sample interval: " << sample_interval << "\n";
         }
-        std::cout << "==========================================\n\n";
+        std::cout << "Use convoluted sampling: " << (use_convoluted_sampling ? "Yes" : "No") << "\n";
+        if (use_convoluted_sampling) {
+            std::cout << "Convolution half window size: " << convolution_half_k << "\n";
+        }
+        std::cout << "=========================================="\n\n";
     }
     
     // Create output directory if it doesn't exist
@@ -193,6 +206,15 @@ int main(int argc, char* argv[]) {
         // Set MCMC options
         my_chromosome.set_skip_zero_contact_loci(skip_zero_contact_loci);
         my_chromosome.set_sample_from_prior(sample_from_prior);
+        
+        // Compute convoluted matrices if requested
+        if (use_convoluted_sampling) {
+            if (verbose) {
+                std::cout << "Computing convoluted contact and distance matrices (half_k=" << convolution_half_k << ")...\n";
+            }
+            my_chromosome.compute_and_store_convoluted_matrices(convolution_half_k);
+            std::cout << "Convoluted matrices computed and stored.\n";
+        }
         
         // Fit gamma prior if position file is provided
         if (!prior_positions_file.empty()) {
@@ -347,6 +369,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Initial SD: " << mcmc_initial_sd << "\n";
             std::cout << "SD floor: " << mcmc_sd_floor << "\n";
             std::cout << "SD ceiling: " << mcmc_sd_ceil << "\n";
+            std::cout << "Using convoluted sampling: " << (use_convoluted_sampling ? "Yes" : "No") << "\n";
             if (save_samples) {
                 std::cout << "Saving samples: every " << sample_interval << " iterations after burn-in\n";
             }
@@ -355,10 +378,17 @@ int main(int argc, char* argv[]) {
             if (save_samples) {
                 std::cout << ", saving samples";
             }
+            if (use_convoluted_sampling) {
+                std::cout << ", using convoluted matrices";
+            }
             std::cout << ")...\n";
         }
         
-        my_chromosome.run_mcmc(mcmc_iterations, mcmc_burn_in, mcmc_initial_sd, mcmc_sd_floor, mcmc_sd_ceil, save_samples, sample_interval);
+        if (use_convoluted_sampling) {
+            my_chromosome.run_mcmc_convoluted(mcmc_iterations, mcmc_burn_in, mcmc_initial_sd, mcmc_sd_floor, mcmc_sd_ceil, save_samples, sample_interval, convolution_half_k);
+        } else {
+            my_chromosome.run_mcmc(mcmc_iterations, mcmc_burn_in, mcmc_initial_sd, mcmc_sd_floor, mcmc_sd_ceil, save_samples, sample_interval);
+        }
         
         // --- 5. Save final results ---
         if (verbose) {

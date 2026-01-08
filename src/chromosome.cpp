@@ -9,31 +9,49 @@
 // Helper Function: convolute_contacts
 // =========================================================================
 /*
- * @brief Convolve contact matrix by counting nonzero elements in k×k square centered at each location.
+ * @brief Convolve contact matrix by counting nonzero elements in upper triangular part of window.
+ * Only processes upper triangular elements (excluding diagonal), counts nonzero elements
+ * in the upper triangular portion of the window, then makes result symmetric.
  * @param contact_matrix Input contact matrix (arma::mat).
- * @param k Size of the square window (default=3).
- * @return Convoluted matrix with same shape as input.
+ * @param half_k Half window size (default=3).
+ * @return Convoluted matrix with same shape as input (symmetric).
  */
-arma::mat convolute_contacts(const arma::mat& contact_matrix, int k) {
+arma::mat convolute_contacts(const arma::mat& contact_matrix, int half_k) {
     arma::uword n = contact_matrix.n_rows;
     arma::mat result = arma::zeros<arma::mat>(n, n);
     
-    // Half window size for centering
-    int half_k = k / 2;
-    
+    // Only process upper triangular part (excluding diagonal)
     for (arma::uword i = 0; i < n; i++) {
-        for (arma::uword j = 0; j < n; j++) {
+        for (arma::uword j = i + 1; j < n; j++) {
             // Define window boundaries with edge handling
             arma::uword i_start = (i >= static_cast<arma::uword>(half_k)) ? i - half_k : 0;
             arma::uword i_end = std::min(n, i + half_k + 1);
             arma::uword j_start = (j >= static_cast<arma::uword>(half_k)) ? j - half_k : 0;
             arma::uword j_end = std::min(n, j + half_k + 1);
             
-            // Extract window and count nonzero elements
+            // Extract window
             arma::mat window = contact_matrix.submat(i_start, j_start, i_end - 1, j_end - 1);
-            result(i, j) = arma::accu(window != 0);
+            
+            // Count only nonzero elements in the upper triangular part of the window
+            int count = 0;
+            for (arma::uword row = 0; row < window.n_rows; row++) {
+                for (arma::uword col = 0; col < window.n_cols; col++) {
+                    arma::uword global_row = i_start + row;
+                    arma::uword global_col = j_start + col;
+                    
+                    // Only count if in upper triangular (global_col > global_row) and nonzero
+                    if (global_col > global_row && window(row, col) != 0) {
+                        count++;
+                    }
+                }
+            }
+            
+            result(i, j) = count;
         }
     }
+    
+    // Make symmetric
+    result = result + result.t();
     
     return result;
 }
@@ -965,6 +983,20 @@ void Chromosome::sample_locus_positions(double& current_ll, double sd_locus, int
 
 
 // ========================================================================
+// Sample Locus Positions Using Convoluted Matrices
+// ========================================================================
+
+void Chromosome::sample_locus_positions_convoluted(double& current_ll, double sd_locus, int& accepted_locus, int k) {
+    // TODO: Placeholder for convoluted sampling using theta parameters
+    // The convolution should be applied to theta (exp(beta0 + beta1 * log(distance)))
+    // rather than to the distance matrix itself.
+    
+    logger->warn("sample_locus_positions_convoluted called but not yet implemented. Using standard sampling.");
+    sample_locus_positions(current_ll, sd_locus, accepted_locus);
+}
+
+
+// ========================================================================
 // Main MCMC Function
 // ========================================================================
 
@@ -1376,20 +1408,10 @@ const arma::mat& Chromosome::get_convoluted_contact_matrix() const {
     return convoluted_contact_matrix;
 }
 
-const arma::mat& Chromosome::get_convoluted_distance_matrix() const {
-    return convoluted_distance_matrix;
-}
-
 void Chromosome::set_convoluted_contact_matrix(const arma::mat& convoluted_contacts) {
     convoluted_contact_matrix = convoluted_contacts;
     logger->info("Set convoluted contact matrix ({} x {})", 
                  convoluted_contacts.n_rows, convoluted_contacts.n_cols);
-}
-
-void Chromosome::set_convoluted_distance_matrix(const arma::mat& convoluted_distances) {
-    convoluted_distance_matrix = convoluted_distances;
-    logger->info("Set convoluted distance matrix ({} x {})", 
-                 convoluted_distances.n_rows, convoluted_distances.n_cols);
 }
 
 void Chromosome::compute_convoluted_contact_matrix(int k) {
@@ -1400,59 +1422,7 @@ void Chromosome::compute_convoluted_contact_matrix(int k) {
     }
     
     convoluted_contact_matrix = convolute_contacts(contact_matrix, k);
-    logger->info("Computed convoluted contact matrix with window size k={}", k);
-    std::cout << "Convoluted contact matrix computed (window size k=" << k << ")" << std::endl;
+    logger->info("Computed convoluted contact matrix with half_window_size={}", k);
+    std::cout << "Convoluted contact matrix computed (half_window_size=" << k << ")" << std::endl;
 }
 
-void Chromosome::compute_convoluted_distance_matrix(int k) {
-    if (pairwise_distance_matrix.is_empty()) {
-        std::cerr << "Error: Cannot compute convoluted distance matrix - distance matrix is empty" << std::endl;
-        logger->error("Failed to compute convoluted distance matrix: distance matrix is empty");
-        return;
-    }
-    
-    convoluted_distance_matrix = convolute_contacts(pairwise_distance_matrix, k);
-    logger->info("Computed convoluted distance matrix with window size k={}", k);
-    std::cout << "Convoluted distance matrix computed (window size k=" << k << ")" << std::endl;
-}
-
-void Chromosome::compute_and_store_convoluted_matrices(int k) {
-    // First, compute convoluted contact matrix
-    if (contact_matrix.is_empty()) {
-        std::cerr << "Error: Cannot compute convoluted matrices - contact matrix is empty" << std::endl;
-        logger->error("Failed to compute convoluted matrices: contact matrix is empty");
-        return;
-    }
-    
-    std::cout << "Computing convoluted matrices with window size k=" << k << "..." << std::endl;
-    logger->info("Starting computation of convoluted matrices with k={}", k);
-    
-    // Compute convoluted contact matrix
-    convoluted_contact_matrix = convolute_contacts(contact_matrix, k);
-    logger->info("Computed convoluted contact matrix");
-    
-    // Check if we need to compute distance matrix (multi-cluster case)
-    arma::uword num_clusters = arma::max(cluster_labels) + 1;
-    
-    if (num_clusters > 1) {
-        // Multi-cluster case: need to compute pairwise distance matrix if not already available
-        if (position_matrix.is_empty()) {
-            std::cerr << "Warning: Position matrix is empty, cannot compute distance matrix" << std::endl;
-            logger->warn("Position matrix is empty, skipping convoluted distance matrix computation");
-        } else {
-            // Compute pairwise distances if not already computed
-            
-            std::cout << "Num clusters greater than 1. Computing pairwise distance matrix for convoluted distance matrix..." << std::endl;
-            logger->info("Num clusters greater than 1. Computing pairwise distance matrix for convoluted distance matrix");
-            pairwise_distance_matrix = calculate_pairwise_distances(position_matrix, position_matrix);
-            
-            
-            // Compute convoluted distance matrix
-            convoluted_distance_matrix = convolute_contacts(pairwise_distance_matrix, k);
-            logger->info("Computed convoluted distance matrix");
-            std::cout << "Convoluted distance matrix computed" << std::endl;
-        }
-    } 
-    std::cout << "Convoluted matrices computation complete" << std::endl;
-    logger->info("Completed computation of convoluted matrices");
-}
