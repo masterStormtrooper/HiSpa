@@ -828,6 +828,12 @@ void Chromosome::sample_beta_parameters(double& current_ll, double sd_b0, double
     if (arma::randu() < std::exp(delta_ll)) {
         accepted_b0++;
         current_ll += delta_ll;
+        
+        // Update theta matrix if it exists (for convoluted sampling)
+        if (!theta_matrix.is_empty()) {
+            theta_matrix = arma::exp(beta0 + beta1 * arma::log(pairwise_distance_matrix + 1e-10));
+            theta_matrix.diag().zeros();
+        }
     } else {
         this->beta0 = old_beta0;
     }
@@ -844,6 +850,12 @@ void Chromosome::sample_beta_parameters(double& current_ll, double sd_b0, double
     if (arma::randu() < std::exp(delta_ll)) {
         accepted_b1++;
         current_ll += delta_ll;
+        
+        // Update theta matrix if it exists (for convoluted sampling)
+        if (!theta_matrix.is_empty()) {
+            theta_matrix = arma::exp(beta0 + beta1 * arma::log(pairwise_distance_matrix + 1e-10));
+            theta_matrix.diag().zeros();
+        }
     } else {
         this->beta1 = old_beta1;
     }
@@ -987,12 +999,147 @@ void Chromosome::sample_locus_positions(double& current_ll, double sd_locus, int
 // ========================================================================
 
 void Chromosome::sample_locus_positions_convoluted(double& current_ll, double sd_locus, int& accepted_locus, int k) {
-    // TODO: Placeholder for convoluted sampling using theta parameters
-    // The convolution should be applied to theta (exp(beta0 + beta1 * log(distance)))
-    // rather than to the distance matrix itself.
+    arma::uword n_loci = position_matrix.n_rows;
+    int half_k = k / 2;
     
-    logger->warn("sample_locus_positions_convoluted called but not yet implemented. Using standard sampling.");
-    sample_locus_positions(current_ll, sd_locus, accepted_locus);
+    // Initialize theta matrix if empty
+    if (theta_matrix.is_empty()) {
+        theta_matrix = arma::exp(beta0 + beta1 * arma::log(pairwise_distance_matrix + 1e-10));
+        theta_matrix.diag().zeros();  // Zero diagonal
+        logger->info("Initialized theta matrix for convoluted sampling");
+    }
+    
+    for (arma::uword j = 0; j < n_loci; ++j) {
+        arma::uword c_j = cluster_labels(j);
+        const auto& adj = cluster_adjacencies[c_j];
+        
+        // Get indices of neighbors (excluding j itself)
+        arma::uvec self_idx_minus_j = adj.self_indices;
+        self_idx_minus_j.shed_row(arma::as_scalar(arma::find(self_idx_minus_j == j)));
+        arma::uvec combined_idx = arma::join_cols(self_idx_minus_j, adj.neighbor_indices);
+        
+        // Skip if this locus has zero contacts with all other loci (if option enabled)
+        if (skip_zero_contact_loci) {
+            arma::rowvec contacts_j_row = contact_matrix.row(j);
+            if (arma::accu(contacts_j_row) == 0) {
+                continue;  // No contact data for this locus
+            }
+        }
+        
+        arma::rowvec pos_j = position_matrix.row(j);
+        arma::rowvec proposed_pos_j;
+        
+        // Sample new position: either from prior positions or random perturbation
+        if (sample_from_prior && !prior_position_matrix.is_empty() && j < prior_position_matrix.n_rows) {
+            proposed_pos_j = prior_position_matrix.row(j) + arma::randn<arma::rowvec>(3) * sd_locus;
+        } else {
+            proposed_pos_j = pos_j + arma::randn<arma::rowvec>(3) * sd_locus;
+        }
+
+        // Compute new distances and thetas only for neighbor loci
+        arma::mat proposed_dists;
+        arma::mat proposed_thetas;
+        if (!combined_idx.is_empty()) {
+            proposed_dists = calculate_pairwise_distances(proposed_pos_j, position_matrix.rows(combined_idx));
+            proposed_thetas = arma::exp(beta0 + beta1 * arma::log(proposed_dists + 1e-10));
+        }
+        
+        double delta_ll = 0.0;
+        
+        // For each neighbor pair (i, m), check if their convoluted theta is affected
+        // Only consider neighbors to reduce computation
+        for (arma::uword idx1 = 0; idx1 < combined_idx.n_elem; ++idx1) {
+            arma::uword i = combined_idx(idx1);
+            
+            for (arma::uword idx2 = idx1 + 1; idx2 < combined_idx.n_elem; ++idx2) {
+                arma::uword m = combined_idx(idx2);
+                
+                // Define window boundaries for convoluted cell (i, m)
+                arma::uword i_start = (i >= static_cast<arma::uword>(half_k)) ? i - half_k : 0;
+                arma::uword i_end = std::min(n_loci, i + half_k + 1);
+                arma::uword m_start = (m >= static_cast<arma::uword>(half_k)) ? m - half_k : 0;
+                arma::uword m_end = std::min(n_loci, m + half_k + 1);
+                
+                // Check if window intersects with locus j (row j or column j in the crucifix)
+                bool window_contains_j = (j >= i_start && j < i_end) || (j >= m_start && j < m_end);
+                
+                if (!window_contains_j) {
+                    continue;  // This convoluted cell is unaffected
+                }
+                
+                // Compute current convoluted theta (sum over window, upper triangular only)
+                double current_conv_theta = 0.0;
+                for (arma::uword r = i_start; r < i_end; ++r) {
+                    for (arma::uword c = m_start; c < m_end; ++c) {
+                        if (r < c) {  // upper triangular only
+                            current_conv_theta += theta_matrix(r, c);
+                        }
+                    }
+                }
+                
+                // Compute proposed convoluted theta (substitute affected thetas involving j)
+                double proposed_conv_theta = current_conv_theta;
+                for (arma::uword r = i_start; r < i_end; ++r) {
+                    for (arma::uword c = m_start; c < m_end; ++c) {
+                        if (r < c) {  // upper triangular only
+                            // Check if this element involves locus j
+                            if (r == j || c == j) {
+                                // Subtract old theta
+                                proposed_conv_theta -= theta_matrix(r, c);
+                                
+                                // Add new theta (lookup from proposed_thetas)
+                                arma::uword other_locus = (r == j) ? c : r;
+                                auto it = std::find(combined_idx.begin(), combined_idx.end(), other_locus);
+                                if (it != combined_idx.end()) {
+                                    arma::uword other_idx = std::distance(combined_idx.begin(), it);
+                                    proposed_conv_theta += proposed_thetas(0, other_idx);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Compute likelihood change for this convoluted cell
+                double c_im = convoluted_contact_matrix(i, m);
+                if (current_conv_theta > 1e-10) {
+                    delta_ll -= c_im * std::log(current_conv_theta) - current_conv_theta;
+                }
+                if (proposed_conv_theta > 1e-10) {
+                    delta_ll += c_im * std::log(proposed_conv_theta) - proposed_conv_theta;
+                }
+            }
+        }
+        
+        // Add distance prior contribution if informative priors exist
+        if (distance_priors.has_informative_priors()) {
+            double current_log_prior = distance_priors.log_prior_for_locus(position_matrix, pos_j, j);
+            double proposed_log_prior = distance_priors.log_prior_for_locus(position_matrix, proposed_pos_j, j);
+            delta_ll += (proposed_log_prior - current_log_prior);
+        }
+
+        // Accept or reject
+        if (arma::randu() < std::exp(delta_ll)) {
+            // Update position matrix
+            position_matrix.row(j) = proposed_pos_j;
+            
+            // Update pairwise distance matrix (only for neighbors)
+            if (!combined_idx.is_empty()) {
+                pairwise_distance_matrix.submat(arma::uvec{j}, combined_idx) = proposed_dists;
+                pairwise_distance_matrix.submat(combined_idx, arma::uvec{j}) = proposed_dists.t();
+            }
+            pairwise_distance_matrix(j, j) = 0;
+            
+            // Update theta matrix (only for neighbors)
+            if (!combined_idx.is_empty()) {
+                theta_matrix.submat(arma::uvec{j}, combined_idx) = proposed_thetas;
+                theta_matrix.submat(combined_idx, arma::uvec{j}) = proposed_thetas.t();
+            }
+            theta_matrix(j, j) = 0;
+            
+            accepted_locus++;
+            current_ll += delta_ll;
+        }
+    }
 }
 
 
@@ -1261,6 +1408,221 @@ void Chromosome::log_memory_usage() {
     #else
         logger->info("Memory usage reporting not supported on this platform.");
     #endif
+}
+
+
+// ========================================================================
+// Run MCMC with Convoluted Sampling
+// ========================================================================
+
+void Chromosome::run_mcmc_convoluted(int iterations, int burn_in, double initial_sd, double sd_floor, double sd_ceiling, bool save_samples, int sample_interval, int k) {
+    if (pairwise_distance_matrix.is_empty()) {
+        std::cerr << "Error: Positions must be initialized before running MCMC." << std::endl;
+        return;
+    }
+    
+    // Compute convoluted contact matrix
+    if (convoluted_contact_matrix.is_empty()) {
+        std::cout << "Computing convoluted contact matrix (half_k=" << k << ")..." << std::endl;
+        logger->info("Computing convoluted contact matrix with half_k={}", k);
+        compute_convoluted_contact_matrix(k);
+    }
+    
+    // Initialize theta matrix for convoluted sampling
+    theta_matrix = arma::exp(beta0 + beta1 * arma::log(pairwise_distance_matrix + 1e-10));
+    theta_matrix.diag().zeros();
+    logger->info("Initialized theta matrix for convoluted sampling");
+    
+    // Compute initial log-likelihood using convoluted matrices
+    // For convoluted likelihood: sum over (i,j) of [c_conv(i,j) * log(theta_conv(i,j)) - theta_conv(i,j)]
+    // where theta_conv(i,j) = sum of thetas in window around (i,j)
+    arma::mat convoluted_theta = convolute_contacts(theta_matrix, k);
+    double current_ll = 0.0;
+    arma::uword n = convoluted_contact_matrix.n_rows;
+    for (arma::uword i = 0; i < n; ++i) {
+        for (arma::uword j = i + 1; j < n; ++j) {
+            double c_ij = convoluted_contact_matrix(i, j);
+            double theta_ij = convoluted_theta(i, j);
+            if (theta_ij > 1e-10) {
+                current_ll += c_ij * std::log(theta_ij) - theta_ij;
+            }
+        }
+    }
+    
+    std::cout << "\n--- Starting MCMC Sampling (Convoluted) ---" << std::endl;
+    logger->info("--- Starting MCMC Sampling (Convoluted) ---");
+    logger->info("Convolution half_window_size: {}", k);
+    logger->info("Initial beta0: {:.4f}, Initial beta1: {:.4f}, Initial loglikelihood: {:.4f}", this->beta0, this->beta1, current_ll);
+    logger->info("Iterations: {}, Burn-in: {}", iterations, burn_in);
+    
+    // Set up sample saving if requested
+    std::string samples_file;
+    std::ofstream samples_stream;
+    int samples_saved = 0;
+    
+    if (save_samples) {
+        std::string samples_dir = chromosome_name + "/samples";
+        std::filesystem::create_directories(samples_dir);
+        
+        auto now = std::chrono::system_clock::now();
+        auto time_t = std::chrono::system_clock::to_time_t(now);
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+        
+        std::stringstream ss;
+        ss << samples_dir << "/mcmc_samples_convoluted_" << std::put_time(std::localtime(&time_t), "%Y%m%d_%H%M%S") 
+           << "_" << std::setfill('0') << std::setw(3) << ms.count() << ".txt";
+        samples_file = ss.str();
+        
+        samples_stream.open(samples_file);
+        if (!samples_stream.is_open()) {
+            std::cerr << "Warning: Could not open samples file " << samples_file << ". Continuing without saving samples." << std::endl;
+            save_samples = false;
+        } else {
+            logger->info("Saving MCMC samples to: {}", samples_file);
+            logger->info("Sample interval: every {} iterations after burn-in", sample_interval);
+            
+            samples_stream << "# MCMC Samples (Convoluted) - HiSpa Chromosome Analysis\n";
+            samples_stream << "# Generated: " << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S") << "\n";
+            samples_stream << "# Convolution half_k: " << k << "\n";
+            samples_stream << "# Iterations: " << iterations << ", Burn-in: " << burn_in << ", Sample interval: " << sample_interval << "\n";
+            samples_stream << "# Matrix dimensions: " << position_matrix.n_rows << " loci x " << position_matrix.n_cols << " coordinates (X,Y,Z)\n";
+            samples_stream << "# Columns: iteration log_likelihood beta0 beta1 [position_matrix: locus1_x locus1_y locus1_z locus2_x locus2_y locus2_z ...]\n";
+            samples_stream << std::fixed << std::setprecision(6);
+        }
+    }
+
+    std::string intermediate_dir = chromosome_name + "/intermediate_results";
+    std::filesystem::create_directories(intermediate_dir);
+    logger->info("Saving intermediate best results to: {}", intermediate_dir);
+
+    // --- Adaptive MCMC setup ---
+    double sd_b0 = initial_sd, sd_b1 = initial_sd, sd_center = initial_sd, sd_locus = initial_sd;
+    int accepted_b0 = 0, accepted_b1 = 0, accepted_center = 0, accepted_locus = 0;
+    int total_accepted_b0 = 0, total_accepted_b1 = 0, total_accepted_center = 0, total_accepted_locus = 0;
+    
+    mcmc_trace_beta0.set_size(iterations - burn_in);
+    mcmc_trace_beta1.set_size(iterations - burn_in);
+    mcmc_trace_log_likelihood.set_size(iterations - burn_in);
+    mcmc_trace_cluster_centers.reserve(iterations - burn_in);
+    mcmc_trace_block_durations.reserve((iterations / 50) + 1);
+
+    arma::uword num_clusters = cluster_center_position_matrix.n_rows;
+    arma::uword n_loci = position_matrix.n_rows;
+
+    auto block_start_time = std::chrono::steady_clock::now();
+    auto total_start_time = std::chrono::steady_clock::now();
+    
+    for (int i = 0; i < iterations; ++i) {
+        // Sample beta parameters (updates theta_matrix internally when accepted)
+        int iter_accepted_b0 = 0, iter_accepted_b1 = 0;
+        sample_beta_parameters(current_ll, sd_b0, sd_b1, iter_accepted_b0, iter_accepted_b1);
+        accepted_b0 += iter_accepted_b0;
+        accepted_b1 += iter_accepted_b1;
+        total_accepted_b0 += iter_accepted_b0;
+        total_accepted_b1 += iter_accepted_b1;
+        
+        // Sample cluster center positions (not yet implemented for convoluted version)
+        // TODO: Implement sample_cluster_centers_convoluted
+        int iter_accepted_center = 0;
+        // For now, skip cluster center sampling in convoluted mode
+        // sample_cluster_centers(current_ll, sd_center, iter_accepted_center);
+        // accepted_center += iter_accepted_center;
+        // total_accepted_center += iter_accepted_center;
+        
+        // Sample individual locus positions using convoluted matrices
+        int iter_accepted_locus = 0;
+        sample_locus_positions_convoluted(current_ll, sd_locus, iter_accepted_locus, k);
+        accepted_locus += iter_accepted_locus;
+        total_accepted_locus += iter_accepted_locus;
+
+        // Track best state
+        if (current_ll > max_log_likelihood) {
+            max_log_likelihood = current_ll;
+            best_position_matrix = position_matrix;
+        }
+
+        // Save samples after burn-in
+        if (save_samples && i >= burn_in && (i - burn_in) % sample_interval == 0) {
+            samples_stream << (i + 1) << " " << current_ll << " " << this->beta0 << " " << this->beta1;
+            
+            for (arma::uword row = 0; row < position_matrix.n_rows; ++row) {
+                for (arma::uword col = 0; col < position_matrix.n_cols; ++col) {
+                    samples_stream << " " << position_matrix(row, col);
+                }
+            }
+            
+            samples_stream << "\n";
+            samples_saved++;
+            
+            if (samples_saved % 100 == 0) {
+                samples_stream.flush();
+            }
+        }
+
+        // Adapt proposal SDs and log progress
+        if ((i + 1) % 50 == 0) {
+            auto block_end_time = std::chrono::steady_clock::now();
+            std::chrono::duration<double> block_duration = block_end_time - block_start_time;
+            mcmc_trace_block_durations.push_back(block_duration.count());
+            
+            double rate_b0 = (double)accepted_b0 / 50.0;
+            double rate_b1 = (double)accepted_b1 / 50.0;
+            double rate_center = (num_clusters > 1) ? (double)accepted_center / (50.0 * num_clusters) : 0.0;
+            double rate_locus = (double)accepted_locus / (50.0 * n_loci);
+
+            logger->info("-------------------- Block Summary (Iter {}) --------------------", i + 1);
+            logger->info("Time for last 50 iterations: {:.2f} seconds.", block_duration.count());
+            logger->info("Acceptance Rates -> beta0: {:.2f}%, beta1: {:.2f}%, center: {:.2f}%, locus: {:.2f}%", rate_b0 * 100.0, rate_b1 * 100.0, rate_center * 100.0, rate_locus * 100.0);
+            logger->info("Proposal SDs -> beta0: {:.4f}, beta1: {:.4f}, center: {:.4f}, locus: {:.4f}", sd_b0, sd_b1, sd_center, sd_locus);
+            logger->info("Current State -> max LL: {:.4f}, beta0: {:.4f}, beta1: {:.4f}", max_log_likelihood, this->beta0, this->beta1);
+
+            // Save intermediate results
+            std::string iter_str = std::to_string(i + 1);
+            best_position_matrix.save(intermediate_dir + "/positions_iter" + iter_str + ".txt", arma::raw_ascii);
+            
+            std::ofstream param_file(intermediate_dir + "/parameters_iter" + iter_str + ".txt");
+            param_file << "iteration " << (i + 1) << std::endl;
+            param_file << "max_log_likelihood " << max_log_likelihood << std::endl;
+            param_file << "current_log_likelihood " << current_ll << std::endl;
+            param_file << "beta0 " << this->beta0 << std::endl;
+            param_file << "beta1 " << this->beta1 << std::endl;
+            param_file << "convolution_half_k " << k << std::endl;
+            param_file.close();
+
+            if (rate_b0 > 0.3) sd_b0 = std::min(sd_b0*2.0, sd_ceiling); else if (rate_b0 < 0.2) sd_b0 = std::max(sd_b0/2.0, sd_floor);
+            if (rate_b1 > 0.3) sd_b1 = std::min(sd_b1*2.0, sd_ceiling); else if (rate_b1 < 0.2) sd_b1 = std::max(sd_b1/2.0, sd_floor);
+            if (num_clusters > 1) {
+                if (rate_center > 0.3) sd_center = std::min(sd_center*2.0, sd_ceiling); else if (rate_center < 0.2) sd_center = std::max(sd_center/2.0, sd_floor);
+            }
+            if (rate_locus > 0.3) sd_locus = std::min(sd_locus*2.0, sd_ceiling); else if (rate_locus < 0.2) sd_locus = std::max(sd_locus/2.0, sd_floor);
+            
+            accepted_b0=0; accepted_b1=0; accepted_center=0; accepted_locus=0;
+            block_start_time = std::chrono::steady_clock::now();
+        }
+
+        if ((i + 1) % 1000 == 0) {
+            std::cout << "Iter " << i+1 << "/" << iterations << ". LL: " << current_ll << ". Best LL: " << max_log_likelihood << std::endl;
+        }
+    }
+
+    if (save_samples && samples_stream.is_open()) {
+        samples_stream.close();
+        std::cout << "Saved " << samples_saved << " samples to: " << samples_file << std::endl;
+        logger->info("Saved {} samples to: {}", samples_saved, samples_file);
+    }
+
+    std::cout << "--- MCMC Finished (Convoluted) ---" << std::endl;
+    std::cout << "Final max log-likelihood found: " << max_log_likelihood << std::endl;
+    std::cout << "Beta0 acceptance rate: " << (double)total_accepted_b0 / iterations * 100.0 << "%" << std::endl;
+    std::cout << "Beta1 acceptance rate: " << (double)total_accepted_b1 / iterations * 100.0 << "%" << std::endl;
+    if (num_clusters > 1) {
+        std::cout << "Center pos acceptance rate: " << (double)total_accepted_center / (iterations * num_clusters) * 100.0 << "%" << std::endl;
+    }
+    std::cout << "Locus pos acceptance rate: " << (double)total_accepted_locus / (iterations * n_loci) * 100.0 << "%" << std::endl;
+    auto total_end_time = std::chrono::steady_clock::now();
+    std::chrono::duration<double> total_duration = total_end_time - total_start_time;
+    logger->info("Total MCMC duration: {:.2f} seconds.", total_duration.count());
+    log_memory_usage();
 }
 
 // --- GETTERS ---

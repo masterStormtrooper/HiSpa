@@ -228,6 +228,7 @@ private:
     arma::mat position_matrix;
     arma::mat cluster_center_position_matrix;
     arma::mat pairwise_distance_matrix;
+    arma::mat theta_matrix;  // Precomputed theta = exp(beta0 + beta1 * log(distance)) for convolution
     arma::mat convoluted_contact_matrix;
     double beta0;
     double beta1;

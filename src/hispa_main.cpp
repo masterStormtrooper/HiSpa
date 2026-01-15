@@ -162,7 +162,7 @@ int main(int argc, char* argv[]) {
         if (use_convoluted_sampling) {
             std::cout << "Convolution half window size: " << convolution_half_k << "\n";
         }
-        std::cout << "=========================================="\n\n";
+        std::cout << "==========================================\n";
     }
     
     // Create output directory if it doesn't exist
@@ -210,10 +210,10 @@ int main(int argc, char* argv[]) {
         // Compute convoluted matrices if requested
         if (use_convoluted_sampling) {
             if (verbose) {
-                std::cout << "Computing convoluted contact and distance matrices (half_k=" << convolution_half_k << ")...\n";
+                std::cout << "Computing convoluted contact matrix (half_k=" << convolution_half_k << ")...\n";
             }
-            my_chromosome.compute_and_store_convoluted_matrices(convolution_half_k);
-            std::cout << "Convoluted matrices computed and stored.\n";
+            my_chromosome.compute_convoluted_contact_matrix(convolution_half_k);
+            std::cout << "Convoluted contact matrix computed and stored.\n";
         }
         
         // Fit gamma prior if position file is provided
