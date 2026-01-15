@@ -563,6 +563,29 @@ void Chromosome::scale_structure() {
     logger->info("Median beta0 for assembly: {:.4f}", median_beta0);
     logger->info("Median beta1 for assembly: {:.4f}", median_beta1);
 
+
+    // now scale backbone structure
+    arma::mat backbone_distances = calculate_pairwise_distances(this->backbone_structure, this->backbone_structure);
+    std::vector<double> backbone_ratios_vec;
+    backbone_ratios_vec.reserve(backbone_contact_matrix.n_elem);
+    for(arma::uword i = 0; i < backbone_contact_matrix.n_rows; ++i) {
+        for(arma::uword j = i + 1; j < backbone_contact_matrix.n_cols; ++j) {
+            if (backbone_contact_matrix(i, j) > 0 && backbone_distances(i, j) > 0) {
+                double expected_dist = exp((log(backbone_contact_matrix(i, j)) - median_beta0) / median_beta1);
+                backbone_ratios_vec.push_back(expected_dist / backbone_distances(i, j));
+            }
+        }
+    }
+    arma::vec backbone_ratios(backbone_ratios_vec);
+    double backbone_scale = backbone_ratios.is_empty() ? 1.0 : arma::median(backbone_ratios);
+    backbone_scale = std::max(0.5, std::min(10.0, backbone_scale));
+    logger->info("Scaling backbone structure by a factor of {:.4f}", backbone_scale);
+    arma::rowvec backbone_center = arma::mean(backbone_structure, 0);
+    arma::mat relative_backbone_pos = backbone_structure.each_row() - backbone_center;
+    this->backbone_structure = relative_backbone_pos * backbone_scale;
+    this->backbone_structure.each_row() += backbone_center;
+    
+
     arma::uword n_loci = contact_matrix.n_rows;
     position_matrix.set_size(n_loci, 3);
     arma::uword num_clusters = initial_cluster_structures.size();
@@ -596,6 +619,7 @@ void Chromosome::scale_structure() {
         final_cluster_pos.each_row() += backbone_structure.row(c);
         position_matrix.rows(cluster_indices) = final_cluster_pos;
     }
+    position_matrix.save(chromosome_name + "/post_scale_positions.txt", arma::raw_ascii);
 }
 
 
@@ -624,6 +648,8 @@ void Chromosome::assemble_global_structure() {
 
         arma::rowvec prev_last_locus_pos = position_matrix.row(prev_last_locus_idx);
         arma::rowvec current_first_locus_pos = final_cluster_pos.row(0);
+        std::cout << "Aligning cluster " << c << " to previous cluster " << (c - 1) << "..." << std::endl;
+        std::cout << "Previous last idx: " << prev_last_locus_idx << "prev cluster size: " << prev_cluster_indices.n_elem << std::endl;
         current_first_locus_pos.print("Current first locus position: ");
         prev_last_locus_pos.print("Previous last locus position: ");
 
@@ -634,31 +660,35 @@ void Chromosome::assemble_global_structure() {
         final_cluster_pos = rotate_positions(final_cluster_pos, R);
         position_matrix.rows(cluster_indices) = final_cluster_pos;
         current_first_locus_pos = position_matrix.row(curr_first_locus_idx);
+        prev_last_locus_pos = position_matrix.row(prev_last_locus_idx);
 
-        // arma::vec current_vec = current_first_locus_pos.t() - prev_last_locus_pos.t();
-        // double current_dist = arma::norm(current_vec);
-        // current_vec.print("Current vector: ");
-        // double contact = contact_matrix(prev_last_locus_idx, curr_first_locus_idx);
-        // double expected_dist = current_dist;
-        // if (contact > 0) {
-        //     expected_dist = exp((log(contact) - this->backbone_beta0) / this->backbone_beta1);
-        // }
+        arma::vec current_vec = current_first_locus_pos.t() - prev_last_locus_pos.t();
+        double current_dist = arma::norm(current_vec);
+        current_vec.print("Current vector: ");
+        double contact = contact_matrix(prev_last_locus_idx, curr_first_locus_idx);
+        double expected_dist = current_dist;
+        if (contact > 0) {
+            expected_dist = exp((log(contact) - this->beta0) / this->beta1);
+        }
 
-        // double translation_distance = expected_dist - current_dist;
-        // std::cout << "Aligning cluster " << c << ": current_dist = " << current_dist
-        //           << ", expected_dist = " << expected_dist
-        //           << ", translation_distance = " << translation_distance << std::endl;
-        // for (arma::uword c1 = c; c1 < num_clusters; ++c1) {
-        //     const arma::uvec& c1_indices = cluster_adjacencies[c1].self_indices;
-        //     arma::mat c1_pos = position_matrix.rows(c1_indices);
-        //     // --- Final Translation to match expected distance ---
-        //     arma::rowvec new_cluster_center = backbone_structure.row(c1) + translation_distance * normalise(dest_vec).t();
-        //     arma::rowvec current_cluster_center = backbone_structure.row(c1);
-        //     c1_pos.each_row() += (new_cluster_center - current_cluster_center);
-        //     backbone_structure.row(c1) = new_cluster_center;
-        //     position_matrix.rows(c1_indices) = c1_pos;
+        double translation_distance = expected_dist - current_dist;
+        std::cout << "Aligning cluster " << c << ": current_dist = " << current_dist
+                  << ", expected_dist = " << expected_dist
+                  << ", translation_distance = " << translation_distance << std::endl;
+        for (arma::uword c1 = c; c1 < num_clusters; ++c1) {
+            const arma::uvec& c1_indices = cluster_adjacencies[c1].self_indices;
+            arma::mat c1_pos = position_matrix.rows(c1_indices);
+            // --- Final Translation to match expected distance ---
+            arma::rowvec new_cluster_center = backbone_structure.row(c1) - translation_distance * normalise(dest_vec).t(); // FLAG1
+            arma::rowvec current_cluster_center = backbone_structure.row(c1);
+            c1_pos.each_row() += (new_cluster_center - current_cluster_center);
+            backbone_structure.row(c1) = new_cluster_center;
+            position_matrix.rows(c1_indices) = c1_pos;
 
-        // }
+        }
+        std::cout << "New previous locus pos " << position_matrix.row(prev_last_locus_idx) << " new current first pos " << position_matrix.row(curr_first_locus_idx) << std::endl;
+        double new_current_dist = arma::norm(position_matrix.row(curr_first_locus_idx).t() - position_matrix.row(prev_last_locus_idx).t());
+        std::cout << "Post-alignment distance between clusters " << (c - 1) << " and " << c << ": " << new_current_dist << std::endl;
     }
 
     std::cout << "--- Global Assembly Complete ---" << std::endl;  
@@ -1146,56 +1176,6 @@ void Chromosome::sample_locus_positions_convoluted(double& current_ll, double sd
 // ========================================================================
 // Main MCMC Function
 // ========================================================================
-
-
-
-// void Chromosome::run_mcmc_finetune(int iterations) {
-//     // this is run_mcmc that ignores cluster relationship, all distances are calculated from positions
-//     if (pairwise_distance_matrix.is_empty()) {
-//         std::cerr << "Error: Positions must be initialized before running MCMC." << std::endl;
-//         return;
-//     }
-//     double current_ll = calculate_log_likelihood(pairwise_distance_matrix, contact_matrix);
-//     std::cout << "\n--- Starting MCMC Fine-tuning ---" << std::endl;
-//     logger->info("--- Starting MCMC Fine-tuning ---");
-//     logger->info("Initial beta0: {:.4f}, Initial beta1: {:.4f}, Initial loglikelihood: {:.4f}", this->beta0, this->beta1, current_ll);
-//     logger->info("Iterations: {}", iterations);
-//     auto block_start_time = std::chrono::steady_clock::now();
-//     auto total_start_time = std::chrono::steady_clock::now();
-//     double delta_ll = 0;
-//     for (int i = 0; i < iterations; ++i) {
-//         // --- Sample beta0 ---
-//         double proposed_beta0 = this->beta0 + arma::randn() * sd_b0;
-//         double old_beta0 = this->beta0;
-//         this->beta0 = proposed_beta0;
-//         delta_ll = calculate_log_likelihood(pairwise_distance_matrix, contact_matrix) - current_ll;
-//         if (arma::randu() < exp(delta_ll)) {
-//             accepted_b0++; total_accepted_b0++; current_ll += delta_ll; 
-//         } else { this->beta0 = old_beta0; }
-//         delta_ll = 0;
-//         // --- Sample beta1 ---
-//         double proposed_beta1;
-//         do { proposed_beta1 = this->beta1 + arma::randn() * sd_b1; } while (proposed_beta1 >= 0);
-//         double old_beta1 = this->beta1;
-//         this->beta1 = proposed_beta1;
-//         delta_ll = calculate_log_likelihood(pairwise_distance_matrix, contact_matrix) - current_ll;
-//         if (arma::randu() < exp(delta_ll)) {
-//             accepted_b1++; total_accepted_b1++; current_ll += delta_ll;
-//         } else { this->beta1 = old_beta1; }
-//         delta_ll = 0;
-
-
-//         // propose points one by one
-//         for (arma::uword locus = 0; locus < position_matrix.n_rows; ++locus) {
-//             arma::rowvec old_pos = position_matrix.row(locus);
-//             arma::rowvec proposed_pos = old_pos + arma::randn<arma::rowvec>(3) * sd_locus;
-//             arma::mat old_distances = pairwise_distance_matrix.row(locus);
-//             arma::mat new_distances = calculate_pairwise_distances(proposed_pos, position_matrix);
-            
-
-//         }
-//         }
-//     }
 
 
 void Chromosome::run_mcmc(int iterations, int burn_in, double initial_sd, double sd_floor, double sd_ceiling, bool save_samples, int sample_interval) {
