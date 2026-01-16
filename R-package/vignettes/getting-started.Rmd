@@ -1,0 +1,117 @@
+---
+title: "Getting Started with HiSpaR"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with HiSpaR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Introduction
+
+HiSpaR is an R package for inferring 3D chromatin structures from Hi-C contact matrices using hierarchical Bayesian modeling and MCMC sampling.
+
+## Installation
+
+```{r, eval=FALSE}
+# Install from source
+devtools::install_github("masterStormtrooper/HiSpa", subdir = "R-package")
+```
+
+## Basic Usage
+
+### Loading Data
+
+```{r, eval=FALSE}
+library(HiSpaR)
+
+# Load your Hi-C contact matrix
+contact_matrix <- as.matrix(read.table("contact_matrix.txt"))
+```
+
+### Running Analysis
+
+```{r, eval=FALSE}
+result <- hispa_analyze(
+  contact_matrix = contact_matrix,
+  output_dir = "output",
+  mcmc_iterations = 6000,
+  mcmc_burn_in = 1000,
+  verbose = TRUE
+)
+```
+
+### Examining Results
+
+```{r, eval=FALSE}
+# Summary
+print(result)
+summary(result)
+
+# Extract 3D positions
+positions <- result$position_matrix
+
+# Model parameters
+cat("Beta0:", result$beta0, "\n")
+cat("Beta1:", result$beta1, "\n")
+cat("Log-likelihood:", result$log_likelihood, "\n")
+```
+
+## Visualization
+
+```{r, eval=FALSE}
+# 3D plot (requires rgl package)
+library(rgl)
+plot3d(positions, col = rainbow(nrow(positions)), size = 5)
+
+# Connect sequential loci
+for (i in 1:(nrow(positions)-1)) {
+  lines3d(positions[c(i, i+1), ], col = "gray", lwd = 2)
+}
+```
+
+## Advanced Features
+
+### Using Prior Information
+
+```{r, eval=FALSE}
+# Load prior positions from reference dataset
+prior_positions <- as.matrix(read.table("prior_positions.txt"))
+
+result <- hispa_analyze_with_prior(
+  contact_matrix = contact_matrix,
+  prior_positions = prior_positions,
+  prior_distances = c(1, 2, 5, 10),
+  output_dir = "output_with_prior"
+)
+```
+
+### Contact Matrix Convolution
+
+```{r, eval=FALSE}
+# Smooth contacts
+convoluted <- convolute_contacts(contact_matrix, half_k = 3)
+
+# Use in analysis
+result <- hispa_analyze(
+  contact_matrix = contact_matrix,
+  output_dir = "output",
+  use_convoluted_sampling = TRUE,
+  convolution_half_k = 3
+)
+```
+
+## Tips and Best Practices
+
+1. Start with 1000-2000 iterations for initial exploration
+2. Use clustering for matrices with >200 loci
+3. Enable convolution for noisy data
+4. Save MCMC samples only when needed for diagnostics
+5. Use multiple cores via OpenMP (automatic)

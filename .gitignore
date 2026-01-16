@@ -6,6 +6,8 @@
 !src/**
 !include/
 !include/**
+!R-package/
+!R-package/**
 
 # Also track .gitignore itself
 !.gitignore
