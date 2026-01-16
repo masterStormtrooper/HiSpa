@@ -1,53 +1,42 @@
 context("HiSpaR basic functionality tests")
 
-test_that("convolute_contacts works correctly", {
-  # Create a simple test matrix
-  n <- 10
-  mat <- matrix(rpois(n*n, 5), n, n)
-  mat <- (mat + t(mat)) / 2  # Make symmetric
-  
-  # Convolute
-  result <- convolute_contacts(mat, half_k = 2)
-  
-  # Tests
-  expect_equal(dim(result), c(n, n))
-  expect_true(isSymmetric(result))
-  expect_true(all(result >= 0))
-})
-
 test_that("hispa_analyze handles invalid inputs", {
-  # Test with non-matrix input
-  expect_error(hispa_analyze(c(1, 2, 3), "output"))
-  
-  # Test with non-symmetric matrix (should symmetrize with warning)
-  mat <- matrix(1:9, 3, 3)
-  expect_warning(
-    hispa_analyze(mat, tempdir(), mcmc_iterations = 10)
-  )
+  # Test with non-existent file
+  expect_error(hispa_analyze("nonexistent.txt", "output"))
 })
 
-test_that("hispa_analyze returns correct structure", {
+test_that("hispa_analyze runs successfully", {
   skip_if_not_installed("HiSpaR")
+  skip_on_cran()
   
-  # Create small test matrix
+  # Create small test matrix and save to file
   n <- 20
   mat <- matrix(rpois(n*n, 10), n, n)
   mat <- (mat + t(mat)) / 2
   
+  # Save to temporary file
+  input_file <- file.path(tempdir(), "test_matrix.txt")
+  write.table(mat, input_file, row.names = FALSE, col.names = FALSE)
+  
+  output_dir <- file.path(tempdir(), "hispa_test_output")
+  dir.create(output_dir, showWarnings = FALSE)
+  
+  # Run analysis - returns output directory path
   result <- hispa_analyze(
-    contact_matrix = mat,
-    output_dir = tempdir(),
+    input_file = input_file,
+    output_dir = output_dir,
     mcmc_iterations = 100,
     mcmc_burn_in = 10,
     verbose = FALSE
   )
   
-  # Check structure
-  expect_type(result, "list")
-  expect_true("position_matrix" %in% names(result))
-  expect_true("beta0" %in% names(result))
-  expect_true("beta1" %in% names(result))
-  expect_true("log_likelihood" %in% names(result))
+  # Check that output files exist
+  expect_true(file.exists(file.path(output_dir, "final_positions.txt")))
+  expect_true(file.exists(file.path(output_dir, "log_likelihood_trace.txt")))
+  
+  # Clean up
+  unlink(input_file)
+  unlink(output_dir, recursive = TRUE)
   
   # Check dimensions
   expect_equal(nrow(result$position_matrix), n)

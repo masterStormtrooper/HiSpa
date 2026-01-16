@@ -7,15 +7,14 @@ Authors@R: c(
     person("Your", "Name", email = "your.email@example.com", role = c("aut", "cre")),
     person("Contributors", "Names", role = "ctb")
     )
-Description: HiSpaR provides R bindings for HiSpa, a Hierarchical Bayesian model 
+Description: Provides R bindings for HiSpa, a hierarchical Bayesian model 
     for inferring 3D chromatin structures from Hi-C contact matrices using MCMC sampling.
-    The package uses Rcpp and RcppArmadillo for efficient C++ integration with the 
+    Uses Rcpp and RcppArmadillo for efficient C++ integration with the 
     original HiSpa C++ implementation.
 License: MIT + file LICENSE
 Depends: R (>= 4.0.0)
 Imports: 
-    Rcpp (>= 1.0.0),
-    methods
+    Rcpp (>= 1.0.0)
 LinkingTo: Rcpp, RcppArmadillo
 SystemRequirements: 
     C++17,

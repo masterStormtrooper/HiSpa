@@ -16,8 +16,6 @@
 #' Main functions:
 #' \itemize{
 #'   \item \code{\link{hispa_analyze}}: Run complete HiSpa analysis
-#'   \item \code{\link{hispa_analyze_with_prior}}: Analysis with prior information
-#'   \item \code{\link{convolute_contacts}}: Convolve contact matrices
 #' }
 #'
 #' @docType package

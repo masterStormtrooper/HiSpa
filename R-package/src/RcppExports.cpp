@@ -12,7 +12,7 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // hispa_analyze_cpp
-Rcpp::List hispa_analyze_cpp(std::string input_file, std::string output_dir, int mcmc_iterations, int num_clusters, int mcmc_burn_in, double mcmc_initial_sd, double mcmc_sd_floor, double mcmc_sd_ceil, bool use_cluster_init, int cluster_init_iterations, double cluster_initial_sd, bool save_samples, int sample_interval, bool verbose);
+std::string hispa_analyze_cpp(std::string input_file, std::string output_dir, int mcmc_iterations, int num_clusters, int mcmc_burn_in, double mcmc_initial_sd, double mcmc_sd_floor, double mcmc_sd_ceil, bool use_cluster_init, int cluster_init_iterations, double cluster_initial_sd, bool save_samples, int sample_interval, bool verbose);
 RcppExport SEXP _HiSpaR_hispa_analyze_cpp(SEXP input_fileSEXP, SEXP output_dirSEXP, SEXP mcmc_iterationsSEXP, SEXP num_clustersSEXP, SEXP mcmc_burn_inSEXP, SEXP mcmc_initial_sdSEXP, SEXP mcmc_sd_floorSEXP, SEXP mcmc_sd_ceilSEXP, SEXP use_cluster_initSEXP, SEXP cluster_init_iterationsSEXP, SEXP cluster_initial_sdSEXP, SEXP save_samplesSEXP, SEXP sample_intervalSEXP, SEXP verboseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;

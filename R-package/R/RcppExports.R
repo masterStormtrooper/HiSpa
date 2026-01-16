@@ -5,6 +5,7 @@
 #' 
 #' @description
 #' Internal C++ function. Use hispa_analyze() from R instead.
+#' All results are saved to output_dir by the Chromosome class.
 #' 
 #' @keywords internal
 #' @noRd

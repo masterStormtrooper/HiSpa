@@ -5,7 +5,8 @@
 #' Hi-C contact matrix using MCMC sampling. This function follows the exact
 #' workflow from the HiSpa C++ implementation.
 #'
-#' @param input_file Character string, path to contact matrix file.
+#' @param contact_matrix Numeric matrix, Hi-C contact frequencies (symmetric, n x n).
+#'   Alternatively, a character string path to a contact matrix file.
 #' @param output_dir Character string specifying the output directory path.
 #' @param mcmc_iterations Integer, number of MCMC iterations (default: 6000).
 #' @param num_clusters Integer, number of clusters for hierarchical analysis. 
@@ -54,20 +55,25 @@
 #'
 #' @examples
 #' \dontrun{
-#' # Save contact matrix to file
-#' write.table(contact_mat, "contact_matrix.txt", 
-#'             row.names = FALSE, col.names = FALSE)
+#' # Example 1: Use built-in data
+#' data(su1_contact_mat)
 #' 
-#' # Run analysis - all results saved to output directory
+#' # Run analysis with matrix input
 #' hispa_analyze(
-#'   input_file = "contact_matrix.txt",
+#'   contact_matrix = su1_contact_mat,
 #'   output_dir = "output",
 #'   mcmc_iterations = 6000,
 #'   mcmc_burn_in = 1000,
-#'   num_clusters = 0,  # auto-detect
 #'   use_cluster_init = TRUE,
-#'   cluster_init_iterations = 1000,
 #'   verbose = TRUE
+#' )
+#' 
+#' # Example 2: Use file input
+#' hispa_analyze(
+#'   contact_matrix = "path/to/contact_matrix.txt",
+#'   output_dir = "output",
+#'   mcmc_iterations = 6000,
+#'   mcmc_burn_in = 1000
 #' )
 #' 
 #' # Read results from output directory
@@ -84,9 +90,10 @@
 #' plot3d(final_pos, col = rainbow(nrow(final_pos)), size = 5)
 #' }
 #'
+#' @importFrom utils write.table
 #' @export
 hispa_analyze <- function(
-    input_file,
+    contact_matrix,
     output_dir,
     mcmc_iterations = 6000L,
     num_clusters = 0L,
@@ -101,13 +108,37 @@ hispa_analyze <- function(
     sample_interval = 50L,
     verbose = TRUE
 ) {
-  # Input validation
-  if (!is.character(input_file) || length(input_file) != 1) {
-    stop("input_file must be a single character string")
-  }
+  # Handle input: either matrix or file path
+  temp_file_created <- FALSE
+  input_file <- NULL
   
-  if (!file.exists(input_file)) {
-    stop("Input file does not exist: ", input_file)
+  if (is.character(contact_matrix)) {
+    # Input is a file path
+    input_file <- contact_matrix
+    if (!file.exists(input_file)) {
+      stop("Input file does not exist: ", input_file)
+    }
+  } else if (is.matrix(contact_matrix) || is.data.frame(contact_matrix)) {
+    # Input is a matrix - save to temporary file
+    contact_matrix <- as.matrix(contact_matrix)
+    
+    # Validate matrix
+    if (nrow(contact_matrix) != ncol(contact_matrix)) {
+      stop("contact_matrix must be square (n x n)")
+    }
+    
+    # Create temporary file
+    input_file <- tempfile(pattern = "hispa_input_", fileext = ".txt")
+    write.table(contact_matrix, input_file, 
+                row.names = FALSE, col.names = FALSE)
+    temp_file_created <- TRUE
+    
+    if (verbose) {
+      message("Saved contact matrix (", nrow(contact_matrix), " x ", 
+              ncol(contact_matrix), ") to temporary file")
+    }
+  } else {
+    stop("contact_matrix must be either a matrix or a file path (character string)")
   }
   
   if (!is.character(output_dir) || length(output_dir) != 1) {
@@ -119,23 +150,31 @@ hispa_analyze <- function(
     dir.create(output_dir, recursive = TRUE)
   }
   
-  # Call C++ function (returns output directory path)
-  output_path <- .hispa_analyze_cpp(
-                  input_file,
-                  output_dir,
-                  as.integer(mcmc_iterations),
-                  as.integer(num_clusters),
-                  as.integer(mcmc_burn_in),
-                  as.numeric(mcmc_initial_sd),
-                  as.numeric(mcmc_sd_floor),
-                  as.numeric(mcmc_sd_ceil),
-                  as.logical(use_cluster_init),
-                  as.integer(cluster_init_iterations),
-                  as.numeric(cluster_initial_sd),
-                  as.logical(save_samples),
-                  as.integer(sample_interval),
-                  as.logical(verbose))
-  
-  # Return output directory invisibly
-  invisible(output_path)
+  # Ensure cleanup happens even if there's an error
+  tryCatch({
+    # Call C++ function (returns output directory path)
+    output_path <- .hispa_analyze_cpp(
+                    input_file,
+                    output_dir,
+                    as.integer(mcmc_iterations),
+                    as.integer(num_clusters),
+                    as.integer(mcmc_burn_in),
+                    as.numeric(mcmc_initial_sd),
+                    as.numeric(mcmc_sd_floor),
+                    as.numeric(mcmc_sd_ceil),
+                    as.logical(use_cluster_init),
+                    as.integer(cluster_init_iterations),
+                    as.numeric(cluster_initial_sd),
+                    as.logical(save_samples),
+                    as.integer(sample_interval),
+                    as.logical(verbose))
+    
+    # Return output directory invisibly
+    invisible(output_path)
+  }, finally = {
+    # Clean up temporary file if we created one
+    if (temp_file_created && file.exists(input_file)) {
+      unlink(input_file)
+    }
+  })
 }

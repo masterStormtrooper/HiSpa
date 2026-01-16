@@ -3,6 +3,7 @@
 // =========================================================================
 #include "chromosome.h"
 #include <set>
+#include <Rcpp.h>
 
 
 // =========================================================================
@@ -57,7 +58,7 @@ arma::mat convolute_contacts(const arma::mat& contact_matrix, int half_k) {
 }
 
 Chromosome::Chromosome(const std::string& name) : chromosome_name(name), beta0(0.0), beta1(0.0), skip_zero_contact_loci(true), sample_from_prior(false), max_log_likelihood(-arma::datum::inf) {
-    std::cout << "Chromosome object '" << chromosome_name << "' created." << std::endl;
+    Rcpp::Rcout << "Chromosome object '" << chromosome_name << "' created." << std::endl;
     try {
         std::filesystem::create_directory(chromosome_name);
         std::string log_path = chromosome_name + "/mcmc_log.txt";
@@ -65,12 +66,12 @@ Chromosome::Chromosome(const std::string& name) : chromosome_name(name), beta0(0
         std::replace(logger_name.begin(), logger_name.end(), '/', '_');
         logger = spdlog::basic_logger_mt(logger_name, log_path, true); 
     } catch (const spdlog::spdlog_ex &ex) {
-        std::cerr << "Log initialization failed: " << ex.what() << std::endl;
+        Rcpp::Rcerr << "Log initialization failed: " << ex.what() << std::endl;
     }
 }
 
 Chromosome::Chromosome(const std::string& name, const arma::mat& contacts) : chromosome_name(name), contact_matrix(contacts), beta0(0.0), beta1(0.0), skip_zero_contact_loci(true), sample_from_prior(false), max_log_likelihood(-arma::datum::inf) {
-    std::cout << "Chromosome object '" << chromosome_name << "' created for sub-problem." << std::endl;
+    Rcpp::Rcout << "Chromosome object '" << chromosome_name << "' created for sub-problem." << std::endl;
     try {
         std::filesystem::create_directories(chromosome_name);
         std::string log_path = chromosome_name + "/mcmc_log.txt";
@@ -78,7 +79,7 @@ Chromosome::Chromosome(const std::string& name, const arma::mat& contacts) : chr
         std::replace(logger_name.begin(), logger_name.end(), '/', '_');
         logger = spdlog::basic_logger_mt(logger_name, log_path, true);
     } catch (const spdlog::spdlog_ex &ex) {
-        std::cerr << "Log initialization failed for " << name << ": " << ex.what() << std::endl;
+        Rcpp::Rcerr << "Log initialization failed for " << name << ": " << ex.what() << std::endl;
     }
     // For a sub-problem, all loci belong to a single cluster (label 0)
     arma::uvec single_cluster_labels(contact_matrix.n_rows, arma::fill::zeros);
@@ -87,15 +88,15 @@ Chromosome::Chromosome(const std::string& name, const arma::mat& contacts) : chr
 
 
 Chromosome::~Chromosome() {
-    std::cout << "Chromosome object '" << chromosome_name << "' destroyed." << std::endl;
+    Rcpp::Rcout << "Chromosome object '" << chromosome_name << "' destroyed." << std::endl;
 }
 
 bool Chromosome::load_data_from_file(const std::string& filename) {
-    std::cout << "Loading data from " << filename << std::endl;
+    Rcpp::Rcout << "Loading data from " << filename << std::endl;
     bool success = contact_matrix.load(filename, arma::raw_ascii);
 
     if (success) {
-        std::cout << "Successfully loaded matrix with size: "
+        Rcpp::Rcout << "Successfully loaded matrix with size: "
                   << contact_matrix.n_rows << " x " << contact_matrix.n_cols
                   << std::endl;
         cluster_labels.reset();
@@ -106,14 +107,14 @@ bool Chromosome::load_data_from_file(const std::string& filename) {
         pairwise_distance_matrix.reset();
         max_log_likelihood = -arma::datum::inf;
     } else {
-        std::cerr << "Error: Failed to load data from '" << filename << "'." << std::endl;
+        Rcpp::Rcerr << "Error: Failed to load data from '" << filename << "'." << std::endl;
     }
     return success;
 }
 
 void Chromosome::assign_clusters() {
     if (contact_matrix.is_empty()) {
-        std::cerr << "Error: Cannot assign clusters. Load data first." << std::endl;
+        Rcpp::Rcerr << "Error: Cannot assign clusters. Load data first." << std::endl;
         return;
     }
     arma::uword n_loci = contact_matrix.n_rows;
@@ -125,17 +126,17 @@ void Chromosome::assign_clusters() {
 
 void Chromosome::assign_clusters(int num_clusters) {
     if (contact_matrix.is_empty()) {
-        std::cerr << "Error: Cannot assign clusters. Load data first." << std::endl;
+        Rcpp::Rcerr << "Error: Cannot assign clusters. Load data first." << std::endl;
         return;
     }
     if (num_clusters <= 0) {
-        std::cerr << "Error: Number of clusters must be positive." << std::endl;
+        Rcpp::Rcerr << "Error: Number of clusters must be positive." << std::endl;
         return;
     }
     arma::uword n_loci = contact_matrix.n_rows;
     arma::uword cluster_size = n_loci / num_clusters;
     cluster_labels.set_size(n_loci);
-    std::cout << "Assigning " << n_loci << " loci into " << num_clusters << " clusters..." << std::endl;
+    Rcpp::Rcout << "Assigning " << n_loci << " loci into " << num_clusters << " clusters..." << std::endl;
     for (arma::uword i = 0; i < n_loci; ++i) {
         arma::uword label = i / cluster_size;
         if (label >= num_clusters) {
@@ -149,16 +150,16 @@ void Chromosome::assign_clusters(int num_clusters) {
 
 bool Chromosome::assign_clusters(const arma::uvec& custom_labels) {
     if (contact_matrix.is_empty()) {
-        std::cerr << "Error: Cannot assign clusters. Load data first." << std::endl;
+        Rcpp::Rcerr << "Error: Cannot assign clusters. Load data first." << std::endl;
         return false;
     }
     if (custom_labels.n_elem != contact_matrix.n_rows) {
-        std::cerr << "Error: Size of custom label vector (" << custom_labels.n_elem
+        Rcpp::Rcerr << "Error: Size of custom label vector (" << custom_labels.n_elem
                   << ") does not match the number of loci (" << contact_matrix.n_rows
                   << ")." << std::endl;
         return false;
     }
-    std::cout << "Assigning custom cluster labels..." << std::endl;
+    Rcpp::Rcout << "Assigning custom cluster labels..." << std::endl;
     this->cluster_labels = custom_labels;
     cluster_adjacencies.clear();
     backbone_contact_matrix.reset();
@@ -171,7 +172,7 @@ void Chromosome::calculate_backbone_contact_matrix(const std::vector<arma::uvec>
     // Determine the contact source: prior contact matrix, calculated from prior positions, or current contact matrix
     arma::mat contact_source = contact_matrix;
     if (!prior_contact_matrix.is_empty()) {
-        std::cout << "Using prior contact matrix for backbone calculation..." << std::endl;
+        Rcpp::Rcout << "Using prior contact matrix for backbone calculation..." << std::endl;
         logger->info("Using prior contact matrix ({} x {}) for backbone", prior_contact_matrix.n_rows, prior_contact_matrix.n_cols);
         contact_source = prior_contact_matrix;
     } 
@@ -194,15 +195,15 @@ void Chromosome::calculate_backbone_contact_matrix(const std::vector<arma::uvec>
 
 void Chromosome::build_cluster_relationships(double k) {
     if (cluster_labels.is_empty()) {
-        std::cerr << "Error: Cannot build relationships. Assign clusters first." << std::endl;
+        Rcpp::Rcerr << "Error: Cannot build relationships. Assign clusters first." << std::endl;
         return;
     }
     if (k < 0.0 || k > 1.0) {
-        std::cerr << "Warning: k should be between 0.0 and 1.0." << std::endl;
+        Rcpp::Rcerr << "Warning: k should be between 0.0 and 1.0." << std::endl;
     }
     arma::uvec unique_labels = arma::unique(cluster_labels);
     arma::uword num_clusters = unique_labels.n_elem;
-    std::cout << "Building relationships for " << num_clusters << " clusters using geometric mean..." << std::endl;
+    Rcpp::Rcout << "Building relationships for " << num_clusters << " clusters using geometric mean..." << std::endl;
     std::vector<arma::uvec> indices_by_cluster(num_clusters);
     for (arma::uword i = 0; i < cluster_labels.n_elem; ++i) {
         indices_by_cluster[cluster_labels(i)].insert_rows(0, arma::uvec{i});
@@ -302,12 +303,12 @@ void Chromosome::build_cluster_relationships(double k) {
 
 void Chromosome::build_cluster_relationships_by_distance(int window_size) {
     if (cluster_labels.is_empty()) {
-        std::cerr << "Error: Cannot build relationships. Assign clusters first." << std::endl;
+        Rcpp::Rcerr << "Error: Cannot build relationships. Assign clusters first." << std::endl;
         return;
     }
     arma::uvec unique_labels = arma::unique(cluster_labels);
     arma::uword num_clusters = unique_labels.n_elem;
-    std::cout << "Building relationships for " << num_clusters << " clusters using distance window..." << std::endl;
+    Rcpp::Rcout << "Building relationships for " << num_clusters << " clusters using distance window..." << std::endl;
 
     std::vector<arma::uvec> indices_by_cluster(num_clusters);
     for (arma::uword i = 0; i < cluster_labels.n_elem; ++i) {
@@ -364,11 +365,11 @@ void Chromosome::build_cluster_relationships_by_distance(int window_size) {
 
 void Chromosome::initialize_positions() {
     if (contact_matrix.is_empty() || cluster_labels.is_empty()) {
-        std::cerr << "Error: Load data and assign clusters before initializing positions." << std::endl;
+        Rcpp::Rcerr << "Error: Load data and assign clusters before initializing positions." << std::endl;
         return;
     }
     arma::uword n_loci = contact_matrix.n_rows;
-    std::cout << "Initializing " << n_loci << " loci positions along the x-axis..." << std::endl;
+    Rcpp::Rcout << "Initializing " << n_loci << " loci positions along the x-axis..." << std::endl;
 
     // Create an n_loci x 3 matrix filled with zeros
     position_matrix.zeros(n_loci, 3);
@@ -382,13 +383,13 @@ void Chromosome::initialize_positions() {
     arma::uword num_clusters = unique_labels.n_elem;
 
     cluster_center_position_matrix.set_size(num_clusters, 3);
-    std::cout << "Calculating " << num_clusters << " cluster center positions..." << std::endl;
+    Rcpp::Rcout << "Calculating " << num_clusters << " cluster center positions..." << std::endl;
     for (arma::uword c = 0; c < num_clusters; ++c) {
         arma::uvec indices = arma::find(cluster_labels == c);
         cluster_center_position_matrix.row(c) = arma::mean(position_matrix.rows(indices), 0);
     }
     
-    std::cout << "Calculating initial hybrid pairwise distance matrix..." << std::endl;
+    Rcpp::Rcout << "Calculating initial hybrid pairwise distance matrix..." << std::endl;
     pairwise_distance_matrix = calculate_pairwise_distances(position_matrix, position_matrix);
 
     for (arma::uword c1 = 0; c1 < num_clusters; ++c1) {
@@ -415,13 +416,13 @@ void Chromosome::initialize_positions() {
     best_position_matrix = position_matrix;
     position_matrix.save(chromosome_name + "/initial_positions.txt", arma::raw_ascii);
     pairwise_distance_matrix.save(chromosome_name + "/initial_distances.txt", arma::raw_ascii);
-    std::cout << "Initial log-likelihood: " << max_log_likelihood << std::endl;
+    Rcpp::Rcout << "Initial log-likelihood: " << max_log_likelihood << std::endl;
 }
 
 
 void Chromosome::initialize_structure_from_clusters(int sub_iterations, int sub_burn_in, double initial_sd) {
     if (cluster_adjacencies.empty()) {
-        std::cerr << "Error: Build cluster relationships before initializing from clusters." << std::endl;
+        Rcpp::Rcerr << "Error: Build cluster relationships before initializing from clusters." << std::endl;
         return;
     }
 
@@ -434,7 +435,7 @@ void Chromosome::initialize_structure_from_clusters(int sub_iterations, int sub_
     std::string init_dir = chromosome_name + "/initialization";
     std::filesystem::create_directories(init_dir);
 
-    std::cout << "\n--- Initializing Structures for Each Cluster and Backbone (in parallel) ---" << std::endl;
+    Rcpp::Rcout << "\n--- Initializing Structures for Each Cluster and Backbone (in parallel) ---" << std::endl;
     auto init_start_time = std::chrono::steady_clock::now();
 
     #pragma omp parallel for
@@ -447,7 +448,7 @@ void Chromosome::initialize_structure_from_clusters(int sub_iterations, int sub_
             std::string cluster_name = init_dir + "/cluster_" + std::to_string(c);
             
             #pragma omp critical
-            std::cout << "--- Processing " << cluster_name << " (" << self_idx.n_elem << " loci) on thread " << omp_get_thread_num() << " ---" << std::endl;
+            Rcpp::Rcout << "--- Processing " << cluster_name << " (" << self_idx.n_elem << " loci) on thread " << omp_get_thread_num() << " ---" << std::endl;
 
             Chromosome cluster_chr(cluster_name, sub_contacts);
             cluster_chr.assign_clusters(1);
@@ -468,7 +469,7 @@ void Chromosome::initialize_structure_from_clusters(int sub_iterations, int sub_
             std::string backbone_name = init_dir + "/backbone";
             
             #pragma omp critical
-            std::cout << "--- Processing " << backbone_name << " (" << this->backbone_contact_matrix.n_rows << " clusters) on thread " << omp_get_thread_num() << " ---" << std::endl;
+            Rcpp::Rcout << "--- Processing " << backbone_name << " (" << this->backbone_contact_matrix.n_rows << " clusters) on thread " << omp_get_thread_num() << " ---" << std::endl;
             
             arma::mat backbone_contacts_double = this->backbone_contact_matrix;
             Chromosome backbone_chr(backbone_name, backbone_contacts_double);
@@ -487,7 +488,7 @@ void Chromosome::initialize_structure_from_clusters(int sub_iterations, int sub_
             }
         }
     }
-    std::cout << "--- Finished Initializing All Cluster and Backbone Structures ---" << std::endl;
+    Rcpp::Rcout << "--- Finished Initializing All Cluster and Backbone Structures ---" << std::endl;
     auto init_end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> init_duration = init_end_time - init_start_time;
     logger->info("Initialization completed in {:.2f} seconds.", init_duration.count());
@@ -625,11 +626,11 @@ void Chromosome::scale_structure() {
 
 void Chromosome::assemble_global_structure() {
     if (initial_cluster_structures.empty() || backbone_structure.is_empty()) {
-        std::cerr << "Error: Must run initialize_structure_from_clusters() before assembling." << std::endl;
+        Rcpp::Rcerr << "Error: Must run initialize_structure_from_clusters() before assembling." << std::endl;
         return;
     }
 
-    std::cout << "\n--- Assembling Global Structure ---" << std::endl;
+    Rcpp::Rcout << "\n--- Assembling Global Structure ---" << std::endl;
     auto assembly_start_time = std::chrono::steady_clock::now();
     scale_structure();
     // arma::uword n_loci = contact_matrix.n_rows;
@@ -647,8 +648,8 @@ void Chromosome::assemble_global_structure() {
 
         arma::rowvec prev_last_locus_pos = position_matrix.row(prev_last_locus_idx);
         arma::rowvec current_first_locus_pos = final_cluster_pos.row(0);
-        std::cout << "Aligning cluster " << c << " to previous cluster " << (c - 1) << "..." << std::endl;
-        std::cout << "Previous last idx: " << prev_last_locus_idx << "prev cluster size: " << prev_cluster_indices.n_elem << std::endl;
+        Rcpp::Rcout << "Aligning cluster " << c << " to previous cluster " << (c - 1) << "..." << std::endl;
+        Rcpp::Rcout << "Previous last idx: " << prev_last_locus_idx << "prev cluster size: " << prev_cluster_indices.n_elem << std::endl;
         current_first_locus_pos.print("Current first locus position: ");
         prev_last_locus_pos.print("Previous last locus position: ");
 
@@ -671,7 +672,7 @@ void Chromosome::assemble_global_structure() {
         }
 
         double translation_distance = expected_dist - current_dist;
-        std::cout << "Aligning cluster " << c << ": current_dist = " << current_dist
+        Rcpp::Rcout << "Aligning cluster " << c << ": current_dist = " << current_dist
                   << ", expected_dist = " << expected_dist
                   << ", translation_distance = " << translation_distance << std::endl;
         for (arma::uword c1 = c; c1 < num_clusters; ++c1) {
@@ -685,12 +686,12 @@ void Chromosome::assemble_global_structure() {
             position_matrix.rows(c1_indices) = c1_pos;
 
         }
-        std::cout << "New previous locus pos " << position_matrix.row(prev_last_locus_idx) << " new current first pos " << position_matrix.row(curr_first_locus_idx) << std::endl;
+        Rcpp::Rcout << "New previous locus pos " << position_matrix.row(prev_last_locus_idx) << " new current first pos " << position_matrix.row(curr_first_locus_idx) << std::endl;
         double new_current_dist = arma::norm(position_matrix.row(curr_first_locus_idx).t() - position_matrix.row(prev_last_locus_idx).t());
-        std::cout << "Post-alignment distance between clusters " << (c - 1) << " and " << c << ": " << new_current_dist << std::endl;
+        Rcpp::Rcout << "Post-alignment distance between clusters " << (c - 1) << " and " << c << ": " << new_current_dist << std::endl;
     }
 
-    std::cout << "--- Global Assembly Complete ---" << std::endl;  
+    Rcpp::Rcout << "--- Global Assembly Complete ---" << std::endl;  
      
     auto assembly_end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> assembly_duration = assembly_end_time - assembly_start_time;
@@ -699,12 +700,12 @@ void Chromosome::assemble_global_structure() {
     arma::uvec unique_labels = arma::unique(cluster_labels);
 
     cluster_center_position_matrix.set_size(num_clusters, 3);
-    std::cout << "Calculating " << num_clusters << " cluster center positions..." << std::endl;
+    Rcpp::Rcout << "Calculating " << num_clusters << " cluster center positions..." << std::endl;
     for (arma::uword c = 0; c < num_clusters; ++c) {
         arma::uvec indices = arma::find(cluster_labels == c);
         cluster_center_position_matrix.row(c) = arma::mean(position_matrix.rows(indices), 0);
     }
-    std::cout << "Calculating initial hybrid pairwise distance matrix..." << std::endl;
+    Rcpp::Rcout << "Calculating initial hybrid pairwise distance matrix..." << std::endl;
     pairwise_distance_matrix = calculate_pairwise_distances(position_matrix, position_matrix);
 
     for (arma::uword c1 = 0; c1 < num_clusters; ++c1) {
@@ -731,9 +732,9 @@ void Chromosome::assemble_global_structure() {
     best_position_matrix = position_matrix;
     position_matrix.save(chromosome_name + "/initial_positions.txt", arma::raw_ascii);
     pairwise_distance_matrix.save(chromosome_name + "/initial_distances.txt", arma::raw_ascii);
-    std::cout << "Initial log-likelihood: " << max_log_likelihood << std::endl;
-    std::cout << "Position matrix has shape: " << position_matrix.n_rows << " x " << position_matrix.n_cols << std::endl;
-    std::cout << "DEBUG: End of assemble_global_structure(), this=" << this 
+    Rcpp::Rcout << "Initial log-likelihood: " << max_log_likelihood << std::endl;
+    Rcpp::Rcout << "Position matrix has shape: " << position_matrix.n_rows << " x " << position_matrix.n_cols << std::endl;
+    Rcpp::Rcout << "DEBUG: End of assemble_global_structure(), this=" << this 
               << ", position_matrix.is_empty()=" << position_matrix.is_empty() 
               << ", position_matrix.memptr()=" << (void*)position_matrix.memptr() << std::endl;
 }
@@ -754,7 +755,7 @@ bool Chromosome::fit_distance_priors_from_file(const std::string& positions_file
     bool loaded = positions.load(positions_file, arma::raw_ascii);
     
     if (!loaded) {
-        std::cerr << "Error: Could not load position matrix from " << positions_file << std::endl;
+        Rcpp::Rcerr << "Error: Could not load position matrix from " << positions_file << std::endl;
         logger->error("Failed to load position matrix from {}", positions_file);
         return false;
     }
@@ -765,7 +766,7 @@ bool Chromosome::fit_distance_priors_from_file(const std::string& positions_file
 
 bool Chromosome::fit_distance_priors(const arma::mat& positions, const std::vector<int>& distances) {
     if (positions.n_rows < 2) {
-        std::cerr << "Error: Need at least 2 positions to fit prior." << std::endl;
+        Rcpp::Rcerr << "Error: Need at least 2 positions to fit prior." << std::endl;
         logger->error("Cannot fit prior: position matrix has fewer than 2 rows");
         return false;
     }
@@ -774,18 +775,18 @@ bool Chromosome::fit_distance_priors(const arma::mat& positions, const std::vect
     distance_priors = DistancePriors(distances);
     prior_position_matrix = positions;  // Store the positions used to fit the priors
     
-    std::cout << "\n=== Fitting Distance Priors ===" << std::endl;
+    Rcpp::Rcout << "\n=== Fitting Distance Priors ===" << std::endl;
     logger->info("Fitting gamma priors for {} distance(s)", distances.size());
     
     // Fit each distance separately
     for (int dist : distances) {
         if (dist <= 0) {
-            std::cerr << "Warning: Skipping invalid distance " << dist << " (must be positive)" << std::endl;
+            Rcpp::Rcerr << "Warning: Skipping invalid distance " << dist << " (must be positive)" << std::endl;
             continue;
         }
         
         if (static_cast<arma::uword>(dist) >= positions.n_rows) {
-            std::cerr << "Warning: Distance " << dist << " exceeds position matrix size, skipping" << std::endl;
+            Rcpp::Rcerr << "Warning: Distance " << dist << " exceeds position matrix size, skipping" << std::endl;
             continue;
         }
         
@@ -799,7 +800,7 @@ bool Chromosome::fit_distance_priors(const arma::mat& positions, const std::vect
         
         // Check for invalid distances
         if (arma::any(dist_values <= 0)) {
-            std::cerr << "Warning: Found non-positive distances for separation " << dist << ", skipping" << std::endl;
+            Rcpp::Rcerr << "Warning: Found non-positive distances for separation " << dist << ", skipping" << std::endl;
             logger->warn("Skipping distance {}: found non-positive values", dist);
             continue;
         }
@@ -809,7 +810,7 @@ bool Chromosome::fit_distance_priors(const arma::mat& positions, const std::vect
         double variance = arma::var(dist_values, 1);  // normalized by n-1
         
         if (variance <= 0) {
-            std::cerr << "Warning: Non-positive variance for distance " << dist << ", skipping" << std::endl;
+            Rcpp::Rcerr << "Warning: Non-positive variance for distance " << dist << ", skipping" << std::endl;
             logger->warn("Skipping distance {}: variance = {}", dist, variance);
             continue;
         }
@@ -820,15 +821,15 @@ bool Chromosome::fit_distance_priors(const arma::mat& positions, const std::vect
         // Store the fitted prior
         distance_priors.set_prior(dist, GammaPrior(shape_mom, rate_mom));
         
-        std::cout << "Distance " << dist << " (n=" << n_pairs << " pairs):" << std::endl;
-        std::cout << "  Shape = " << shape_mom << ", Rate = " << rate_mom << std::endl;
-        std::cout << "  Mean = " << mean << ", SD = " << std::sqrt(variance) << std::endl;
+        Rcpp::Rcout << "Distance " << dist << " (n=" << n_pairs << " pairs):" << std::endl;
+        Rcpp::Rcout << "  Shape = " << shape_mom << ", Rate = " << rate_mom << std::endl;
+        Rcpp::Rcout << "  Mean = " << mean << ", SD = " << std::sqrt(variance) << std::endl;
         
         logger->info("Distance {}: shape={:.4f}, rate={:.4f}, mean={:.4f}, sd={:.4f} ({} pairs)", 
                      dist, shape_mom, rate_mom, mean, std::sqrt(variance), n_pairs);
     }
     
-    std::cout << "=== Distance Prior Fitting Complete ===" << std::endl;
+    Rcpp::Rcout << "=== Distance Prior Fitting Complete ===" << std::endl;
     
     return true;
 }
@@ -1183,11 +1184,11 @@ void Chromosome::sample_locus_positions_convoluted(double& current_ll, double sd
 
 void Chromosome::run_mcmc(int iterations, int burn_in, double initial_sd, double sd_floor, double sd_ceiling, bool save_samples, int sample_interval) {
     if (pairwise_distance_matrix.is_empty()) {
-        std::cerr << "Error: Positions must be initialized before running MCMC." << std::endl;
+        Rcpp::Rcerr << "Error: Positions must be initialized before running MCMC." << std::endl;
         return;
     }
     double current_ll = calculate_log_likelihood(pairwise_distance_matrix, contact_matrix);
-    std::cout << "\n--- Starting MCMC Sampling ---" << std::endl;
+    Rcpp::Rcout << "\n--- Starting MCMC Sampling ---" << std::endl;
     logger->info("--- Starting MCMC Sampling ---");
     logger->info("Initial beta0: {:.4f}, Initial beta1: {:.4f}, Initial loglikelihood: {:.4f}", this->beta0, this->beta1, current_ll);
     logger->info("Iterations: {}, Burn-in: {}", iterations, burn_in);
@@ -1214,7 +1215,7 @@ void Chromosome::run_mcmc(int iterations, int burn_in, double initial_sd, double
         
         samples_stream.open(samples_file);
         if (!samples_stream.is_open()) {
-            std::cerr << "Warning: Could not open samples file " << samples_file << ". Continuing without saving samples." << std::endl;
+            Rcpp::Rcerr << "Warning: Could not open samples file " << samples_file << ". Continuing without saving samples." << std::endl;
             save_samples = false;
         } else {
             logger->info("Saving MCMC samples to: {}", samples_file);
@@ -1341,25 +1342,25 @@ void Chromosome::run_mcmc(int iterations, int burn_in, double initial_sd, double
         }
 
         if ((i + 1) % 1000 == 0) {
-            std::cout << "Iter " << i+1 << "/" << iterations << ". LL: " << max_log_likelihood << ". Best LL: " << max_log_likelihood << std::endl;
+            Rcpp::Rcout << "Iter " << i+1 << "/" << iterations << ". LL: " << max_log_likelihood << ". Best LL: " << max_log_likelihood << std::endl;
         }
     }
 
     // Close samples file if it was opened
     if (save_samples && samples_stream.is_open()) {
         samples_stream.close();
-        std::cout << "Saved " << samples_saved << " samples to: " << samples_file << std::endl;
+        Rcpp::Rcout << "Saved " << samples_saved << " samples to: " << samples_file << std::endl;
         logger->info("Saved {} samples to: {}", samples_saved, samples_file);
     }
 
-    std::cout << "--- MCMC Finished ---" << std::endl;
-    std::cout << "Final max log-likelihood found: " << max_log_likelihood << std::endl;
-    std::cout << "Beta0 acceptance rate: " << (double)total_accepted_b0 / iterations * 100.0 << "%" << std::endl;
-    std::cout << "Beta1 acceptance rate: " << (double)total_accepted_b1 / iterations * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "--- MCMC Finished ---" << std::endl;
+    Rcpp::Rcout << "Final max log-likelihood found: " << max_log_likelihood << std::endl;
+    Rcpp::Rcout << "Beta0 acceptance rate: " << (double)total_accepted_b0 / iterations * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "Beta1 acceptance rate: " << (double)total_accepted_b1 / iterations * 100.0 << "%" << std::endl;
     if (num_clusters > 1) {
-        std::cout << "Center pos acceptance rate: " << (double)total_accepted_center / (iterations * num_clusters) * 100.0 << "%" << std::endl;
+        Rcpp::Rcout << "Center pos acceptance rate: " << (double)total_accepted_center / (iterations * num_clusters) * 100.0 << "%" << std::endl;
     }
-    std::cout << "Locus pos acceptance rate: " << (double)total_accepted_locus / (iterations * n_loci) * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "Locus pos acceptance rate: " << (double)total_accepted_locus / (iterations * n_loci) * 100.0 << "%" << std::endl;
     auto total_end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> total_duration = total_end_time - total_start_time;
     logger->info("Total MCMC duration: {:.2f} seconds.", total_duration.count());
@@ -1407,13 +1408,13 @@ void Chromosome::log_memory_usage() {
 
 void Chromosome::run_mcmc_convoluted(int iterations, int burn_in, double initial_sd, double sd_floor, double sd_ceiling, bool save_samples, int sample_interval, int k) {
     if (pairwise_distance_matrix.is_empty()) {
-        std::cerr << "Error: Positions must be initialized before running MCMC." << std::endl;
+        Rcpp::Rcerr << "Error: Positions must be initialized before running MCMC." << std::endl;
         return;
     }
     
     // Compute convoluted contact matrix
     if (convoluted_contact_matrix.is_empty()) {
-        std::cout << "Computing convoluted contact matrix (half_k=" << k << ")..." << std::endl;
+        Rcpp::Rcout << "Computing convoluted contact matrix (half_k=" << k << ")..." << std::endl;
         logger->info("Computing convoluted contact matrix with half_k={}", k);
         compute_convoluted_contact_matrix(k);
     }
@@ -1439,7 +1440,7 @@ void Chromosome::run_mcmc_convoluted(int iterations, int burn_in, double initial
         }
     }
     
-    std::cout << "\n--- Starting MCMC Sampling (Convoluted) ---" << std::endl;
+    Rcpp::Rcout << "\n--- Starting MCMC Sampling (Convoluted) ---" << std::endl;
     logger->info("--- Starting MCMC Sampling (Convoluted) ---");
     logger->info("Convolution half_window_size: {}", k);
     logger->info("Initial beta0: {:.4f}, Initial beta1: {:.4f}, Initial loglikelihood: {:.4f}", this->beta0, this->beta1, current_ll);
@@ -1465,7 +1466,7 @@ void Chromosome::run_mcmc_convoluted(int iterations, int burn_in, double initial
         
         samples_stream.open(samples_file);
         if (!samples_stream.is_open()) {
-            std::cerr << "Warning: Could not open samples file " << samples_file << ". Continuing without saving samples." << std::endl;
+            Rcpp::Rcerr << "Warning: Could not open samples file " << samples_file << ". Continuing without saving samples." << std::endl;
             save_samples = false;
         } else {
             logger->info("Saving MCMC samples to: {}", samples_file);
@@ -1591,24 +1592,24 @@ void Chromosome::run_mcmc_convoluted(int iterations, int burn_in, double initial
         }
 
         if ((i + 1) % 1000 == 0) {
-            std::cout << "Iter " << i+1 << "/" << iterations << ". LL: " << current_ll << ". Best LL: " << max_log_likelihood << std::endl;
+            Rcpp::Rcout << "Iter " << i+1 << "/" << iterations << ". LL: " << current_ll << ". Best LL: " << max_log_likelihood << std::endl;
         }
     }
 
     if (save_samples && samples_stream.is_open()) {
         samples_stream.close();
-        std::cout << "Saved " << samples_saved << " samples to: " << samples_file << std::endl;
+        Rcpp::Rcout << "Saved " << samples_saved << " samples to: " << samples_file << std::endl;
         logger->info("Saved {} samples to: {}", samples_saved, samples_file);
     }
 
-    std::cout << "--- MCMC Finished (Convoluted) ---" << std::endl;
-    std::cout << "Final max log-likelihood found: " << max_log_likelihood << std::endl;
-    std::cout << "Beta0 acceptance rate: " << (double)total_accepted_b0 / iterations * 100.0 << "%" << std::endl;
-    std::cout << "Beta1 acceptance rate: " << (double)total_accepted_b1 / iterations * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "--- MCMC Finished (Convoluted) ---" << std::endl;
+    Rcpp::Rcout << "Final max log-likelihood found: " << max_log_likelihood << std::endl;
+    Rcpp::Rcout << "Beta0 acceptance rate: " << (double)total_accepted_b0 / iterations * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "Beta1 acceptance rate: " << (double)total_accepted_b1 / iterations * 100.0 << "%" << std::endl;
     if (num_clusters > 1) {
-        std::cout << "Center pos acceptance rate: " << (double)total_accepted_center / (iterations * num_clusters) * 100.0 << "%" << std::endl;
+        Rcpp::Rcout << "Center pos acceptance rate: " << (double)total_accepted_center / (iterations * num_clusters) * 100.0 << "%" << std::endl;
     }
-    std::cout << "Locus pos acceptance rate: " << (double)total_accepted_locus / (iterations * n_loci) * 100.0 << "%" << std::endl;
+    Rcpp::Rcout << "Locus pos acceptance rate: " << (double)total_accepted_locus / (iterations * n_loci) * 100.0 << "%" << std::endl;
     auto total_end_time = std::chrono::steady_clock::now();
     std::chrono::duration<double> total_duration = total_end_time - total_start_time;
     logger->info("Total MCMC duration: {:.2f} seconds.", total_duration.count());
@@ -1630,7 +1631,7 @@ const arma::vec& Chromosome::get_mcmc_trace_beta0() const { return mcmc_trace_be
 const arma::vec& Chromosome::get_mcmc_trace_beta1() const { return mcmc_trace_beta1; }
 const std::vector<arma::mat>& Chromosome::get_mcmc_trace_cluster_centers() const { return mcmc_trace_cluster_centers; }
 const arma::mat& Chromosome::get_best_position_matrix() const { return best_position_matrix; }
-const arma::vec& Chromosome::get_mcmc_trace_log_likelihood() const { std::cout << "mcmc trace length: " << mcmc_trace_log_likelihood.n_elem << std::endl; return mcmc_trace_log_likelihood; }
+const arma::vec& Chromosome::get_mcmc_trace_log_likelihood() const { Rcpp::Rcout << "mcmc trace length: " << mcmc_trace_log_likelihood.n_elem << std::endl; return mcmc_trace_log_likelihood; }
 const std::vector<double>& Chromosome::get_mcmc_trace_block_durations() const { return mcmc_trace_block_durations; }
 const std::vector<arma::mat>& Chromosome::get_initial_cluster_structures() const { return initial_cluster_structures; }
 const arma::mat& Chromosome::get_backbone_structure() const { return backbone_structure; }
@@ -1678,12 +1679,12 @@ void Chromosome::set_adjacent_distance_prior(const GammaPrior& prior) {
 
 void Chromosome::set_position_matrix(const arma::mat& positions) {
     if (positions.n_rows != contact_matrix.n_rows) {
-        std::cerr << "Error: Position matrix has " << positions.n_rows 
+        Rcpp::Rcerr << "Error: Position matrix has " << positions.n_rows 
                   << " rows, but contact matrix has " << contact_matrix.n_rows << " rows" << std::endl;
         return;
     }
     if (positions.n_cols != 3) {
-        std::cerr << "Error: Position matrix must have 3 columns (x, y, z), but has " 
+        Rcpp::Rcerr << "Error: Position matrix must have 3 columns (x, y, z), but has " 
                   << positions.n_cols << " columns" << std::endl;
         return;
     }
@@ -1699,7 +1700,7 @@ void Chromosome::set_position_matrix(const arma::mat& positions) {
 
 void Chromosome::set_prior_contact_matrix(const arma::mat& contacts) {
     if (contacts.n_rows != contacts.n_cols) {
-        std::cerr << "Error: Contact matrix must be square, but has dimensions " 
+        Rcpp::Rcerr << "Error: Contact matrix must be square, but has dimensions " 
                   << contacts.n_rows << " x " << contacts.n_cols << std::endl;
         logger->error("Failed to set prior contact matrix: not square ({} x {})", 
                       contacts.n_rows, contacts.n_cols);
@@ -1709,7 +1710,7 @@ void Chromosome::set_prior_contact_matrix(const arma::mat& contacts) {
     prior_contact_matrix = contacts;
     
     logger->info("Set prior contact matrix ({} x {})", contacts.n_rows, contacts.n_cols);
-    std::cout << "Prior contact matrix stored (" << contacts.n_rows << " x " 
+    Rcpp::Rcout << "Prior contact matrix stored (" << contacts.n_rows << " x " 
               << contacts.n_cols << ")" << std::endl;
 }
 
@@ -1718,20 +1719,20 @@ bool Chromosome::load_prior_contact_matrix_from_file(const std::string& filename
     bool loaded = contacts.load(filename, arma::raw_ascii);
     
     if (!loaded) {
-        std::cerr << "Error: Could not load prior contact matrix from " << filename << std::endl;
+        Rcpp::Rcerr << "Error: Could not load prior contact matrix from " << filename << std::endl;
         logger->error("Failed to load prior contact matrix from {}", filename);
         return false;
     }
     
     if (contacts.n_rows != contacts.n_cols) {
-        std::cerr << "Error: Prior contact matrix must be square, but has dimensions " 
+        Rcpp::Rcerr << "Error: Prior contact matrix must be square, but has dimensions " 
                   << contacts.n_rows << " x " << contacts.n_cols << std::endl;
         logger->error("Prior contact matrix from {} is not square", filename);
         return false;
     }
     
     set_prior_contact_matrix(contacts);
-    std::cout << "Successfully loaded prior contact matrix from: " << filename << std::endl;
+    Rcpp::Rcout << "Successfully loaded prior contact matrix from: " << filename << std::endl;
     
     return true;
 }
@@ -1739,13 +1740,13 @@ bool Chromosome::load_prior_contact_matrix_from_file(const std::string& filename
 void Chromosome::set_skip_zero_contact_loci(bool skip) {
     skip_zero_contact_loci = skip;
     logger->info("Set skip_zero_contact_loci to: {}", skip);
-    std::cout << "Skip zero-contact loci: " << (skip ? "enabled" : "disabled") << std::endl;
+    Rcpp::Rcout << "Skip zero-contact loci: " << (skip ? "enabled" : "disabled") << std::endl;
 }
 
 void Chromosome::set_sample_from_prior(bool sample) {
     sample_from_prior = sample;
     logger->info("Set sample_from_prior to: {}", sample);
-    std::cout << "Sample from prior positions: " << (sample ? "enabled" : "disabled") << std::endl;
+    Rcpp::Rcout << "Sample from prior positions: " << (sample ? "enabled" : "disabled") << std::endl;
 }
 
 bool Chromosome::get_sample_from_prior() const {
@@ -1768,13 +1769,13 @@ void Chromosome::set_convoluted_contact_matrix(const arma::mat& convoluted_conta
 
 void Chromosome::compute_convoluted_contact_matrix(int k) {
     if (contact_matrix.is_empty()) {
-        std::cerr << "Error: Cannot compute convoluted contact matrix - contact matrix is empty" << std::endl;
+        Rcpp::Rcerr << "Error: Cannot compute convoluted contact matrix - contact matrix is empty" << std::endl;
         logger->error("Failed to compute convoluted contact matrix: contact matrix is empty");
         return;
     }
     
     convoluted_contact_matrix = convolute_contacts(contact_matrix, k);
     logger->info("Computed convoluted contact matrix with half_window_size={}", k);
-    std::cout << "Convoluted contact matrix computed (half_window_size=" << k << ")" << std::endl;
+    Rcpp::Rcout << "Convoluted contact matrix computed (half_window_size=" << k << ")" << std::endl;
 }
 

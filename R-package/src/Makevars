@@ -1,23 +1,9 @@
-## Makevars for HiSpaR package compilation
+## Makevars.in for HiSpaR package compilation (configured by autoconf)
 
-# Compiler flags
+# Compiler standard
 CXX_STD = CXX17
-PKG_CPPFLAGS = -I../inst/include -DARMA_DONT_USE_WRAPPER
-PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -O3 -march=native
 
-# Platform-specific settings
-UNAME := $(shell uname)
-
-ifeq ($(UNAME), Darwin)
-  # macOS specific flags - use Accelerate framework instead of LAPACK/BLAS
-  HOMEBREW_PREFIX := $(shell brew --prefix)
-  PKG_CPPFLAGS += -I$(HOMEBREW_PREFIX)/opt/libomp/include -I$(HOMEBREW_PREFIX)/opt/armadillo/include
-  PKG_CXXFLAGS += -Xclang -fopenmp
-  PKG_LIBS = -L$(HOMEBREW_PREFIX)/opt/libomp/lib -lomp -L$(HOMEBREW_PREFIX)/opt/armadillo/lib -larmadillo -framework Accelerate
-endif
-
-ifeq ($(UNAME), Linux)
-  # Linux specific flags
-  PKG_CXXFLAGS += -fopenmp
-  PKG_LIBS = $(LAPACK_LIBS) $(BLAS_LIBS) -lgomp -larmadillo
-endif
+# Flags set by configure script
+PKG_CPPFLAGS = -I../inst/include -I/opt/homebrew/opt/libomp/include -I/opt/homebrew/opt/armadillo/include
+PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -Xclang -fopenmp
+PKG_LIBS = $(SHLIB_OPENMP_CXXLIBS) -L/opt/homebrew/opt/libomp/lib -lomp -L/opt/homebrew/opt/armadillo/lib -larmadillo -framework Accelerate
